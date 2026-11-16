@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>과녁 차기 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, pick, clamp, ASPECT } from '../../common/engine.js';
+
+const S = { balls: [], points: 0, kicks: 0, miss: 0, bulls: 0, next: 0, sideN: 0, foot: { L: { up: false, low: 0, last: -9, kickT: -9 }, R: { up: false, low: 0, last: -9, kickT: -9 } } };
+const NAME = { L: '왼발', R: '오른발' };
+
+start({
+  id: 'target-kick', cat: 'tool', view: 'camera', emoji: '🎯', title: '과녁 차기',
+  desc: '굴러오는 공이 발 앞에 오면 그 발을 힘껏 들어 차서 과녁을 맞혀요.',
+  how: ['화면에 표시된 발(왼발·오른발)을 확인해요.', '공이 발 앞 동그라미에 닿을 때 그 발을 힘껏 차올려요.', '때를 잘 맞출수록 과녁 가운데에 맞아요.'],
+  tip: '공이 오면 발을 힘껏 차올려요!',
+  place: '카메라에서 약 2.5~3m 떨어져, 발끝까지 꼭 보이게 서요.',
+  images: ['ball', 'target', 'star'], bg: 'bg_kick',
+  need: [27, 28], needMsg: '발끝까지 화면에 보이게 조금 뒤로 가 주세요',
+  keys: '<b>Z</b> 왼발 차기 · <b>X</b> 오른발 차기',
+  hud: [['points', '점수'], ['kicks', '맞힌 공']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', travel: 2.3, win: 0.35, gap: [1.2, 1.6], sides: 'R', moving: false },
+    mid:  { name: '중', sub: '익숙해요', travel: 1.9, win: 0.28, gap: [1.0, 1.3], sides: 'alt', moving: false },
+    hard: { name: '상', sub: '도전해요', travel: 1.5, win: 0.22, gap: [0.8, 1.1], sides: 'random', moving: true },
+  },
+  init(api, t) {
+    window.__S = S;
+    Object.assign(S, { balls: [], points: 0, kicks: 0, miss: 0, bulls: 0, next: t + 1, sideN: 0 });
+    for (const k of ['L', 'R']) Object.assign(S.foot[k], { up: false, low: 0, last: -9, kickT: -9 });
+  },
+  update(api, t, dt) {
+    const L = api.L, b = api.base, lm = api.lm;
+    // 발 차올림 감지: 서 있을 때 발목보다 0.18T 위로 0.06초 이상 (천천히 들어도 인정)
+    if (lm) for (const [k, i, base0] of [['L', 27, b.ankL], ['R', 28, b.ankR]]) {
+      const f = S.foot[k]; if ((lm[i].v ?? 1) < 0.5) continue;
+      const lift = (base0 - lm[i].y) / b.T;
+      if (!f.up && lift > 0.18 && t - f.last > 0.4) { f.hold = (f.hold || 0) + dt; if (f.hold >= 0.06) { f.up = true; f.hold = 0; f.last = t; f.kickT = t; onKick(api, k, t); } }
+      else if (!f.up) f.hold = 0;
+      if (f.up) { if (lift < 0.08) { f.low += dt; if (f.low >= 0.15) { f.up = false; f.low = 0; } } else f.low = 0; }
+    }
+    // 새 공
+    if (t >= S.next && !S.balls.some(x => !x.done) && api.timeLeft > L.travel + 0.4) {
+      const side = L.sides === 'R' ? 'R' : L.sides === 'alt' ? (S.sideN++ % 2 ? 'L' : 'R') : pick(['L', 'R']);
+      const ax = side === 'L' ? b.cx - b.W * 0.55 : b.cx + b.W * 0.55;
+      S.balls.push({ side, tx: ax, ty: (side === 'L' ? b.ankL : b.ankR) + 0.01, sx: api.aspect / 2, sy: 0.35, t0: t, arrive: t + L.travel, done: false });
+    }
+    for (const ball of S.balls) if (!ball.done && t > ball.arrive + L.win) {
+      ball.done = true; ball.doneT = t; ball.missed = true; S.miss++;
+      const s = api.toScreen({ x: ball.tx, y: ball.ty }); api.pop('아깝다!', s.x, s.y - 80, '#5B6170', 0.045);
+      S.next = t + rand(L.gap[0], L.gap[1]);
+    }
+    S.balls = S.balls.filter(x => !x.done || t - x.doneT < 0.9);
+    api.hud('points', S.points); api.hud('kicks', S.kicks);
+  },
+  draw(api, ctx, t) {
+    const u = api.unit, W = api.W, H = api.H, L = api.L;
+    if (api.mode !== 'play') return;
+    // 과녁: 캐릭터 머리를 가리지 않게 오른쪽 위 (상: 오른쪽에서 좌우로 움직임)
+    const tx = W * 0.78 + (L.moving ? Math.sin(t * 1.2) * W * 0.1 : 0), ty = H * 0.2, tw = H * 0.2;
+    S.targetX = tx;
+    api.drawImg('target', tx, ty, tw);
+    for (const ball of S.balls) {
+      const foot = api.toScreen({ x: ball.tx, y: ball.ty });
+      if (!ball.done) {
+        const p = clamp((t - ball.t0) / (ball.arrive - ball.t0), 0, 1.2);
+        ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 5; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.ellipse(foot.x, foot.y, u * 0.08, u * 0.035, 0, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+        api.text(NAME[ball.side] + '!', foot.x, foot.y + u * 0.07, H * 0.045, ball.side === 'L' ? '#F26B4F' : '#3A7BEB', 900);
+        const x = ball.sx + (ball.tx - ball.sx) * Math.min(1, p), y = ball.sy + (ball.ty - ball.sy) * Math.min(1, p) + (p > 1 ? (p - 1) * 0.3 : 0);
+        const s = api.toScreen({ x, y }), size = (0.03 + 0.05 * Math.min(1, p)) * u;
+        api.drawImg('ball', s.x, s.y - size, size * 2, -p * 12);
+      } else if (ball.kicked) {
+        const k = clamp((t - ball.doneT) / 0.5, 0, 1);
+        const hx = ball.hitX ?? tx, hy = ty + (ball.hitDy || 0);
+        const x = foot.x + (hx - foot.x) * k, y = foot.y + (hy - foot.y) * k - Math.sin(k * Math.PI) * H * 0.12;
+        api.drawImg('ball', x, y, u * (0.1 - 0.06 * k), k * 20);
+        if (k >= 1) { ctx.fillStyle = '#1F2430'; ctx.beginPath(); ctx.arc(hx, hy, 6, 0, 7); ctx.fill(); }
+      } else {
+        const k = (t - ball.doneT) / 0.9, s = api.toScreen({ x: ball.tx + k * 0.1, y: ball.ty + k * 0.05 });
+        api.drawImg('ball', s.x, s.y, u * 0.1, k * 10, 1 - k);
+      }
+    }
+  },
+  result() {
+    return { stats: [[S.points, '점수'], [S.kicks, '맞힌 공'], [S.bulls, '정중앙']], msg: `공 ${S.kicks + S.miss}개 중 ${S.kicks}개를 과녁에 맞혔어요! 🎯` };
+  },
+});
+
+function onKick(api, side, t) {
+  if (api.mode !== 'play') return;
+  const L = api.L, ball = S.balls.find(x => !x.done);
+  if (!ball) return;
+  const err = Math.abs(t - ball.arrive);
+  if (err > L.win) return;
+  if (ball.side !== side) { const s = api.toScreen({ x: ball.tx, y: ball.ty }); api.pop(`${NAME[ball.side]}로 차요!`, s.x, s.y - 80, '#7B5CC4', 0.04); return; }
+  const q = err / L.win, pts = q < 0.34 ? 3 : q < 0.67 ? 2 : 1;
+  ball.done = true; ball.doneT = t; ball.kicked = true;
+  const H = api.H, off = (pts === 3 ? 0 : pts === 2 ? 0.045 : 0.075) * H;
+  const a = Math.random() * Math.PI * 2; ball.hitX = (S.targetX ?? api.W / 2) + Math.cos(a) * off; ball.hitDy = Math.sin(a) * off;
+  S.points += pts; S.kicks++; if (pts === 3) S.bulls++;
+  api.pop(pts === 3 ? '정중앙! +3' : pts === 2 ? '좋아요! +2' : '맞혔다! +1', api.W * 0.78, H * 0.36, '#F26B4F', 0.06); api.react('happy');
+  api.beep(330, 0.08, 'square', 0.1); api.beep(pts === 3 ? 1175 : 880, 0.15, 'triangle', 0.1, 0.45);
+  S.next = t + 0.5 + Math.random() * 0.5 + api.L.gap[0];
+}
+</script>
+</body>
+</html>

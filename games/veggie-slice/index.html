@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>채소 자르기 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, pick, segDist, dist, mid, clamp, ASPECT } from '../../common/engine.js';
+
+const GOOD = ['carrot', 'broccoli', 'tomato', 'corn'], BAD = ['soda', 'candy'];
+const G = 1.5;                               // 중력 (화면 높이/초²)
+const S = { items: [], halves: [], score: 0, cut: 0, bad: 0, combo: 0, best: 0, next: 0, trails: { 15: [], 16: [] }, lastCut: { 15: -9, 16: -9 } };
+
+function spawn(api, t) {
+  const L = api.L, b = api.base;
+  const n = Math.random() < L.multi ? (L.level === 'hard' ? 3 : 2) : 1;
+  for (let i = 0; i < n; i++) {
+    const bad = Math.random() < L.bad;
+    // 꼭대기 높이: 머리 위(손 뻗기) ~ 무릎(쪼그려 앉기)
+    const hi = b.noseY - 0.12, lo = L.low ? b.kneeL - 0.02 : b.hipY;
+    const apexY = rand(hi, lo);
+    const x = clamp(b.cx + rand(-L.spread, L.spread), 0.12, api.aspect - 0.12);
+    const startY = 1.08, vy = -Math.sqrt(2 * G * (startY - apexY));
+    S.items.push({ x, y: startY, vx: rand(-0.04, 0.04), vy, r: 0.06 * L.size, img: bad ? pick(BAD) : pick(GOOD), bad, rot: rand(0, 6), spin: rand(-2, 2), low: apexY > b.hipY + 0.03, alive: true });
+  }
+}
+
+start({
+  id: 'veggie-slice', cat: 'tool', view: 'camera', emoji: '🥕', title: '채소 자르기',
+  desc: '날아오르는 채소는 손으로 휙 잘라요. 단 음료와 사탕은 피해요!',
+  how: ['손을 크게 휘둘러 화면 속 채소를 잘라요.', '높은 채소는 팔을 쭉 뻗고, 낮은 채소는 쪼그려 앉아 잘라요.', '단 음료와 사탕을 자르면 점수가 줄어요.'],
+  tip: '손을 크게 휘둘러요!',
+  images: ['carrot', 'broccoli', 'tomato', 'corn', 'soda', 'candy', 'star'], bg: 'bg_veggie',
+  keys: '<b>마우스</b>를 빠르게 움직여 자르기 · <b>↓</b> 쪼그려 앉기 · <b>← →</b> 옆으로',
+  hud: [['score', '점수'], ['combo', '연속']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', level: 'easy', every: [1.3, 1.6], multi: 0, bad: 0, low: false, spread: 0.18, size: 1.25, speed: 1.3 },
+    mid:  { name: '중', sub: '익숙해요', level: 'mid', every: [1.0, 1.3], multi: 0.25, bad: 0.2, low: true, spread: 0.26, size: 1.1, speed: 1.5 },
+    hard: { name: '상', sub: '도전해요', level: 'hard', every: [0.75, 1.05], multi: 0.4, bad: 0.25, low: true, spread: 0.34, size: 1.0, speed: 1.5 },
+  },
+  init(api, t) { window.__S = S; Object.assign(S, { items: [], halves: [], score: 0, cut: 0, bad: 0, combo: 0, best: 0, next: t + 0.8, trails: { 15: [], 16: [] }, lastCut: { 15: -9, 16: -9 } }); },
+  update(api, t, dt) {
+    const L = api.L, b = api.base, lm = api.lm, prev = api.prevLm;
+    if (t >= S.next && api.timeLeft > 1.5) { spawn(api, t); S.next = t + rand(L.every[0], L.every[1]); }
+    for (const it of S.items) { it.vy += G * dt; it.x += it.vx * dt; it.y += it.vy * dt; it.rot += it.spin * dt; if (it.y > 1.2 && it.vy > 0) it.alive = false; }
+    // 손 궤적으로 자르기
+    const pdt = api.poseT - api.prevT;
+    const fresh = api.poseT !== S.lastPoseT; S.lastPoseT = api.poseT;   // 새 몸 정보가 들어온 때만 자르기 판정
+    if (fresh && lm && prev && pdt > 0 && pdt < 0.15) {
+      const hipDrop = (mid(lm[23], lm[24]).y - b.hipY) / b.T;
+      for (const i of [15, 16]) {
+        if ((lm[i].v ?? 1) < 0.5) continue;
+        const a = prev[i], c = lm[i], d = dist(a, c);
+        if (d > 0.8 * b.T) continue;                                   // 튄 값은 버림
+        const speed = d / pdt / b.T;                                   // 몸통 길이/초
+        S.trails[i].push({ x: c.x, y: c.y, t });
+        if (speed < L.speed || t - S.lastCut[i] < 0.12) continue;   // 손을 빠르게 휘둘렀을 때만
+        for (const it of S.items) {
+          if (!it.alive) continue;
+          if (segDist(it, a, c) > it.r + 0.08 * b.T) continue;
+          if (it.low && L.low && hipDrop < 0.15) { if (!it.warned) { it.warned = true; const s = api.toScreen(it); api.pop('쪼그려 앉아요!', s.x, s.y - 40, '#5B6170', 0.035); } continue; }
+          it.alive = false; S.lastCut[i] = t;
+          const s = api.toScreen(it);
+          if (it.bad) { S.bad++; S.combo = 0; S.score = Math.max(0, S.score - 1); api.pop(it.img === 'soda' ? '단 음료는 피해요!' : '사탕은 피해요!', s.x, s.y - 40, '#7B5CC4', 0.045); api.beep(180, 0.2, 'square', 0.06); }
+          else { S.cut++; S.combo++; S.best = Math.max(S.best, S.combo); S.score += S.combo >= 3 ? 2 : 1; api.pop(S.combo >= 3 ? `${S.combo}연속! +2` : '+1', s.x, s.y - 40, '#1FA67A'); api.burst(s.x, s.y, '#FFB347', 12); api.beep(880 + Math.min(S.combo, 6) * 60, 0.08, 'triangle', 0.1); }
+          const ang = Math.atan2(c.y - a.y, c.x - a.x);
+          [-1, 1].forEach(side => S.halves.push({ x: it.x, y: it.y, vx: it.vx + Math.cos(ang + Math.PI / 2) * side * 0.25, vy: -0.3, rot: it.rot, spin: side * 4, img: it.img, side, r: it.r, ang, t }));
+        }
+      }
+    }
+    for (const i of [15, 16]) S.trails[i] = S.trails[i].filter(p => t - p.t < 0.18);
+    for (const h of S.halves) { h.vy += G * dt; h.x += h.vx * dt; h.y += h.vy * dt; h.rot += h.spin * dt; }
+    S.items = S.items.filter(it => it.alive);
+    S.halves = S.halves.filter(h => t - h.t < 1.2);
+    api.hud('score', S.score); api.hud('combo', S.combo);
+  },
+  draw(api, ctx, t) {
+    const u = api.unit;
+    if (api.mode !== 'play') return;
+    for (const it of S.items) {
+      const s = api.toScreen(it), w = it.r * 2.4 * u;
+      if (it.bad) { ctx.strokeStyle = 'rgba(123,92,196,.6)'; ctx.lineWidth = 4; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.arc(s.x, s.y, w * 0.55, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+      api.drawImg(it.img, s.x, s.y, w, it.rot);
+    }
+    for (const h of S.halves) {                     // 반으로 잘린 조각
+      const im = api.img(h.img); if (!im) continue;
+      const s = api.toScreen(h), w = h.r * 2.4 * u, hh = w * im.height / im.width;
+      ctx.save(); ctx.globalAlpha = Math.max(0, 1 - (t - h.t) / 1.2); ctx.translate(s.x, s.y); ctx.rotate(h.ang);
+      ctx.beginPath(); ctx.rect(-w, h.side < 0 ? -hh : 0, w * 2, hh); ctx.clip(); ctx.rotate(h.rot - h.ang);
+      ctx.drawImage(im, -w / 2, -hh / 2, w, hh); ctx.restore();
+    }
+    // 손 (빛나는 궤적)
+    const lm = api.lm;
+    for (const i of [15, 16]) {
+      const tr = S.trails[i];
+      if (tr.length > 1) { ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        for (const [w, c] of [[u * 0.045, 'rgba(255,255,255,.5)'], [u * 0.018, 'rgba(255,214,120,.95)']]) { ctx.strokeStyle = c; ctx.lineWidth = w; ctx.beginPath(); tr.forEach((p, k) => { const s = api.toScreen(p); k ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y); }); ctx.stroke(); } }
+      if (lm) { const s = api.toScreen(lm[i]); ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(s.x, s.y, u * 0.025, 0, 7); ctx.fill(); ctx.fillStyle = '#FFB347'; ctx.beginPath(); ctx.arc(s.x, s.y, u * 0.014, 0, 7); ctx.fill(); }
+    }
+  },
+  result() {
+    return { stats: [[S.score, '점수'], [S.cut, '자른 채소'], [S.best, '최고 연속']], msg: S.bad ? `단 음료·사탕을 ${S.bad}번 잘랐어요. 다음엔 피해 봐요!` : '건강한 채소만 쏙쏙 골라 잘랐어요! 🥦' };
+  },
+});
+</script>
+</body>
+</html>

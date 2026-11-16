@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>다 같이 로켓 발사 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, clamp } from '../../common/engine.js';
+import { CROWD_IMAGES, drawBouncers } from '../../common/crowd.js';
+
+const ACTIONS = ['제자리 뛰기', '점핑잭', '무릎 높이 들기', '스쿼트', '제자리 달리기'];
+const S = { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: 0, stars: [], total: 0 };
+
+start({
+  id: 'rocket-launch', cat: 'team', view: 'camera', pose: false, energy: true, emoji: '🚀', title: '다 같이 로켓 발사',
+  desc: '반 친구들이 다 함께 움직인 만큼 로켓 연료가 차요. 연료가 가득 차면 로켓이 날아올라요!',
+  how: ['처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '시작하면 다 같이 크게 움직여요.', '연료가 가득 차면 로켓 발사! 다음 로켓도 채워요.'],
+  tip: '다 같이 크게 움직여요!',
+  place: '카메라에 반 친구들이 모두 보이게 서요. 서로 팔이 닿지 않게 떨어져요.',
+  images: ['rocket', 'star', 'cloud', ...CROWD_IMAGES], bg: 'bg_rocket', puppet: false,
+  keys: '<b>스페이스</b> 점프 · <b>R</b> 제자리 달리기 · <b>← →</b> 움직이기 (움직일수록 연료가 차요)',
+  hud: [['rockets', '발사한 로켓', '대']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', target: 10, actions: false },
+    mid:  { name: '중', sub: '익숙해요', target: 13, actions: true },
+    hard: { name: '상', sub: '도전해요', target: 16, actions: true },
+  },
+  init(api, t) { window.__S = S; Object.assign(S, { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: t, stars: [], total: 0 }); },
+  update(api, t, dt) {
+    const L = api.L, A = api.energy.A;
+    const launching = t - S.launch < 2.6;
+    if (!launching) {
+      const add = A * dt;
+      S.fuel += add; S.total += add;
+      if (S.fuel >= L.target) {
+        S.fuel = 0; S.rockets++; S.launch = t;
+        api.pop(`${S.rockets}번째 로켓 발사!`, api.W / 2, api.H * 0.3, '#3A7BEB', 0.07);
+        [523, 659, 784, 1046].forEach((f, i) => api.beep(f, 0.18, 'triangle', 0.12, i * 0.1));
+      }
+    }
+    if (L.actions && t - S.actionAt > 10) { S.action = (S.action + 1) % ACTIONS.length; S.actionAt = t; api.beep(740, 0.1); }
+    if (Math.random() < A * 0.22) S.stars.push({ x: rand(0.1, 0.9), y: 1, v: rand(0.2, 0.5), t });
+    S.stars = S.stars.filter(s => t - s.t < 2);
+    api.hud('rockets', S.rockets);
+  },
+  draw(api, ctx, t) {
+    const W = api.W, H = api.H, L = api.L;
+    drawBouncers(api, ctx, t, clamp(api.energy.A, 0, 1.2));
+    if (api.mode !== 'play') return;
+    // 반짝이 (움직임이 많을수록)
+    for (const s of S.stars) { const age = t - s.t; api.drawImg('star', s.x * W, H - age * s.v * H, H * 0.03, age * 2, 1 - age / 2); }
+    // 로켓
+    const lt = t - S.launch, rx = W * 0.82;
+    let ry = H * 0.62;
+    if (lt < 2.6) ry -= Math.pow(lt / 2.6, 2) * H * 1.1;
+    const rw = H * 0.22;
+    if (lt < 2.6 || S.fuel > L.target * 0.8) {           // 불꽃
+      const fl = lt < 2.6 ? 1 : (S.fuel / L.target - 0.8) * 3;
+      for (let i = 0; i < 3; i++) { ctx.fillStyle = ['#FFD24D', '#FF9F5A', '#FF6B6B'][i]; ctx.globalAlpha = 0.8;
+        ctx.beginPath(); ctx.ellipse(rx, ry + rw * 0.72 + i * 6, rw * (0.16 - i * 0.04), rw * (0.3 + Math.sin(t * 30 + i) * 0.06) * fl, 0, 0, 7); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
+    if (!api.drawImg('rocket', rx, ry, rw)) { ctx.fillStyle = '#fff'; ctx.fillRect(rx - 30, ry - 60, 60, 120); }
+    if (lt < 2.6 && lt > 0.3) api.drawImg('rocket', rx, H * 0.62 + (1 - Math.min(1, (lt - 0.3) / 0.6)) * H * 0.4, rw, 0, Math.min(1, (lt - 0.3) / 0.6));
+    // 연료 막대
+    const bx = W * 0.92, by = H * 0.25, bh = H * 0.5, bw = H * 0.05, f = clamp(S.fuel / L.target, 0, 1);
+    ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.roundRect(bx - bw / 2 - 6, by - 6, bw + 12, bh + 12, 16); ctx.fill();
+    const g = ctx.createLinearGradient(0, by + bh, 0, by); g.addColorStop(0, '#7CC4F2'); g.addColorStop(1, '#3A7BEB');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(bx - bw / 2, by + bh * (1 - f), bw, bh * f, 10); ctx.fill();
+    api.text('연료', bx, by - 26, H * 0.03, '#3A7BEB');
+    api.text(Math.round(f * 100) + '%', bx, by + bh + 34, H * 0.035, '#3A7BEB');
+    // 지금 움직임
+    const A = clamp(api.energy.A, 0, 1);
+    api.text(A > 0.6 ? '최고예요! 🔥' : A > 0.25 ? '좋아요! 더 크게!' : '다 같이 움직여요!', W / 2, H * 0.86, H * 0.05, A > 0.6 ? '#F26B4F' : '#3A7BEB', 900);
+    if (L.actions) api.text(`지금 동작: ${ACTIONS[S.action]}`, W / 2, H * 0.2, H * 0.06, '#1F2430', 900);
+  },
+  result() {
+    return { stats: [[S.rockets + '대', '발사한 로켓'], [Math.round(S.total), '모은 연료']], msg: S.rockets ? `다 같이 로켓 ${S.rockets}대를 쏘아 올렸어요! 🚀` : '조금만 더 크게 움직이면 로켓을 쏠 수 있어요.' };
+  },
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>얼음땡 춤 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, clamp } from '../../common/engine.js';
+import { CROWD_IMAGES, drawDancers } from '../../common/crowd.js';
+
+const MELODY = [523, 587, 659, 523, 659, 698, 784, 0, 784, 880, 784, 698, 659, 523, 587, 523, 659, 659, 587, 587, 523, 587, 659, 0, 698, 659, 587, 523, 494, 523, 587, 0];
+const BASS = [131, 131, 175, 196];
+const STEP = 0.2;
+const S = { phase: 'dance', until: 0, freezeStart: 0, ok: 0, moved: 0, rounds: 0, dance: 0, samples: 0, below: 0, over: 0, failed: false, noteAt: 0, note: 0, notes: [], flash: -9 };
+
+function newDance(api, t) { const L = api.L; S.phase = 'dance'; S.until = t + rand(L.dance[0], L.dance[1]); S.noteAt = t; api.beep(988, 0.08, 'triangle', 0.08); }
+function newFreeze(api, t) { const L = api.L; S.phase = 'freeze'; S.freezeStart = t; S.until = t + L.grace + L.freeze; S.samples = 0; S.below = 0; S.over = 0; S.failed = false; S.rounds++; api.beep(330, 0.25, 'square', 0.07); }
+
+start({
+  id: 'freeze-dance', cat: 'team', view: 'camera', pose: false, energy: true, emoji: '🧊', title: '얼음땡 춤',
+  desc: '음악이 나오면 신나게 춤추고, 음악이 멈추면 그대로 얼음!',
+  how: ['처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '음악이 나오는 동안 온몸으로 크게 춤춰요.', '음악이 멈추면 움직이지 않고 얼음! 다시 나오면 땡!'],
+  tip: '음악이 멈추면 얼음!',
+  place: '카메라에 친구들이 모두 보이게, 팔을 벌려도 닿지 않게 서요.',
+  images: ['note', 'ice', ...CROWD_IMAGES], bg: 'bg_freeze', puppet: false,
+  keys: '<b>← →</b>·<b>스페이스</b>·<b>R</b> 움직이기 (얼음일 때는 아무 키도 누르지 않기)',
+  hud: [['ok', '얼음 성공']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', dance: [7, 11], freeze: 3, grace: 0.8 },
+    mid:  { name: '중', sub: '익숙해요', dance: [4, 8], freeze: 3, grace: 0.6 },
+    hard: { name: '상', sub: '도전해요', dance: [3, 6], freeze: 3.5, grace: 0.45 },
+  },
+  endDelay: 0.3,
+  init(api, t) { window.__S = S; Object.assign(S, { ok: 0, moved: 0, rounds: 0, dance: 0, notes: [], flash: -9, note: 0 }); newDance(api, t); },
+  update(api, t, dt) {
+    const L = api.L, A = api.energy.A;
+    if (S.phase === 'dance') {
+      S.dance += clamp(A, 0, 1.2) * dt;
+      while (S.noteAt < t + 0.1) {                 // 음악 (조금 앞서 예약)
+        const d = Math.max(0, S.noteAt - t), f = MELODY[S.note % MELODY.length];
+        if (f) api.beep(f, STEP * 0.9, 'triangle', 0.09, d);
+        if (S.note % 4 === 0) api.beep(BASS[(S.note / 4) % 4], STEP * 1.8, 'sine', 0.12, d);
+        S.note++; S.noteAt += STEP;
+      }
+      if (Math.random() < A * 0.5) S.notes.push({ x: rand(0.05, 0.95), y: rand(0.5, 0.9), t, r: rand(-0.5, 0.5) });
+      if (t >= S.until && api.timeLeft > L.freeze + L.grace + 0.5) newFreeze(api, t);
+    } else {
+      const inJudge = t - S.freezeStart > L.grace;
+      if (inJudge && !S.failed) {
+        S.samples++;
+        const still = A < 0.15;
+        if (still) { S.below++; S.over = 0; } else S.over += dt;
+        if (S.over >= 0.2) { S.failed = true; S.moved++; S.flash = t; api.pop('움직였어요! 다시 얼음!', api.W / 2, api.H * 0.45, '#3A7BEB', 0.06); api.beep(200, 0.2, 'sawtooth', 0.05); }
+      }
+      if (t >= S.until) {
+        if (!S.failed && S.samples && S.below / S.samples >= 0.9) { S.ok++; api.pop('얼음 성공! 땡!', api.W / 2, api.H * 0.45, '#1FA67A', 0.07); api.beep(1046, 0.15); }
+        newDance(api, t);
+      }
+    }
+    S.notes = S.notes.filter(n => t - n.t < 1.6);
+    api.hud('ok', `${S.ok} / ${S.rounds}`);
+  },
+  draw(api, ctx, t) {
+    const W = api.W, H = api.H;
+    const playing = api.mode === 'play';
+    drawDancers(api, ctx, t, playing ? clamp(api.energy.A, 0, 1.2) : 0.3, playing && S.phase === 'freeze', t - S.flash < 0.6 ? 1 : 0);
+    if (!playing) return;
+    if (S.phase === 'dance') {
+      for (const n of S.notes) { const a = t - n.t; api.drawImg('note', n.x * W, (n.y - a * 0.2) * H, H * 0.07, n.r, 1 - a / 1.6); }
+      api.text('춤춰요! 🎵', W / 2, H * 0.2, H * 0.09, '#F26B4F', 900);
+      const A = clamp(api.energy.A, 0, 1);
+      api.text(A > 0.5 ? '신나요!' : '더 크게 춤춰요!', W / 2, H * 0.86, H * 0.045, '#F26B4F');
+    } else {
+      ctx.fillStyle = 'rgba(186,224,255,.38)'; ctx.fillRect(0, 0, W, H);
+      for (let i = 0; i < 8; i++) api.drawImg('ice', (0.06 + i * 0.125) * W, H * (0.08 + (i % 2) * 0.06), H * 0.08, t * 0.3 + i, 0.85);
+      api.text('얼음! 🧊', W / 2, H * 0.2, H * 0.1, '#3A7BEB', 900);
+      const left = Math.max(0, S.until - t);
+      api.text(t - S.freezeStart < api.L.grace ? '멈춰요!' : `${left.toFixed(1)}초 버텨요`, W / 2, H * 0.86, H * 0.05, '#3A7BEB');
+      if (t - S.flash < 0.4) { ctx.strokeStyle = '#3A7BEB'; ctx.lineWidth = 16; ctx.strokeRect(8, 8, W - 16, H - 16); }
+    }
+  },
+  result() {
+    return { stats: [[`${S.ok} / ${S.rounds}`, '얼음 성공'], [Math.round(S.dance * 10), '춤 점수']], msg: S.rounds ? '음악에 맞춰 멋지게 춤추고 멈췄어요!' : '' };
+  },
+});
+</script>
+</body>
+</html>

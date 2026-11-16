@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>복싱 패드 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, pick, dist, mid, clamp } from '../../common/engine.js';
+
+const S = { pads: [], pillows: [], hits: 0, miss: 0, dodge: 0, bonk: 0, next: 0, nextPillow: 0, seq: 0, inside: {} };
+
+// 손에 복싱 장갑 (손목·팔꿈치가 잘 보일 때만)
+function drawGloves(api) {
+  const lm = api.lm; if (!lm) return;
+  for (const [w, e, flip] of [[15, 13, true], [16, 14, false]]) {
+    if ((lm[w].v ?? 1) < 0.5 || (lm[e].v ?? 1) < 0.5) continue;
+    const s = api.toScreen(lm[w]), el = api.toScreen(lm[e]);
+    api.drawImg('glove_box', s.x, s.y, api.unit * 0.12, Math.atan2(s.y - el.y, s.x - el.x) + Math.PI / 2, 1, flip);
+  }
+}
+
+function padAt(api, side, yk, k) {
+  const b = api.base, sh = side === 'L' ? b.cx - b.W / 2 : b.cx + b.W / 2;
+  return { x: sh + (side === 'L' ? -1 : 1) * b.W * k, y: b.shY + yk * b.T };
+}
+
+start({
+  id: 'boxing-pads', cat: 'tool', view: 'camera', emoji: '🥊', title: '복싱 패드',
+  desc: '옆에 나타나는 패드를 주먹으로 쭉 뻗어 치고, 날아오는 베개는 숙여서 피해요.',
+  how: ['두 주먹을 얼굴 앞에 들고 서요.', '패드가 나타난 쪽 팔을 옆으로 쭉 뻗어 쳐요.', '베개가 날아오면 무릎을 굽혀 숙이거나 옆으로 피해요.'],
+  tip: '패드 쪽으로 팔을 쭉!',
+  images: ['pad', 'glove_box', 'pillow', 'star'], bg: 'bg_boxing', hands: false,
+  keys: '<b>마우스</b>를 패드 쪽으로 빠르게 뻗기 · <b>↓</b> 숙이기 · <b>← →</b> 옆으로',
+  hud: [['hits', '맞힌 패드'], ['dodge', '피한 베개']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', life: 3.0, every: [0.5, 0.9], reach: [1.05, 1.25], pillow: 0, seq: false, ext: 0.68 },
+    mid:  { name: '중', sub: '익숙해요', life: 2.5, every: [0.4, 0.8], reach: [1.15, 1.35], pillow: 6, seq: false, ext: 0.72 },
+    hard: { name: '상', sub: '도전해요', life: 4.0, every: [0.5, 0.8], reach: [1.2, 1.4], pillow: 5, seq: true, ext: 0.75 },
+  },
+  init(api, t) { window.__S = S; Object.assign(S, { pads: [], pillows: [], hits: 0, miss: 0, dodge: 0, bonk: 0, next: t + 0.8, nextPillow: t + (api.L.pillow || 999), seq: 0, inside: {}, wasActive: false }); },
+  update(api, t, dt) {
+    const L = api.L, b = api.base, lm = api.lm;
+    // 패드 만들기
+    if (t >= S.next && !S.pads.some(p => !p.done) && api.timeLeft > 1.5) {
+      if (L.seq && Math.random() < 0.6) {
+        const order = [pick(['L', 'R'])]; order.push(order[0] === 'L' ? 'R' : 'L'); order.push(pick(['L', 'R']));
+        const ys = [-0.25, 0.1, 0.35];
+        order.forEach((side, i) => S.pads.push({ ...padAt(api, side, ys[i], rand(L.reach[0], L.reach[1])), side, t0: t, life: L.life, n: i + 1, done: false, id: Math.random() }));
+        S.seq = 1;
+      } else {
+        const side = pick(['L', 'R']);
+        S.pads.push({ ...padAt(api, side, rand(-0.3, 0.35), rand(L.reach[0], L.reach[1])), side, t0: t, life: L.life, n: 0, done: false, id: Math.random() });
+        S.seq = 0;
+      }
+    }
+    // 맞혔는지
+    if (lm) {
+      for (const [w, e, s] of [[15, 13, 11], [16, 14, 12]]) {
+        const wr = lm[w]; if ((wr.v ?? 1) < 0.5) continue;
+        const arm = dist(lm[s], lm[e]) + dist(lm[e], wr), ext = arm > 0 ? dist(lm[s], wr) / arm : 0;
+        const v = api.vel(w), speed = Math.hypot(v.x, v.y) / b.T;
+        for (const p of S.pads) {
+          if (p.done) continue;
+          // 손이 패드 밖에 있다가(장전) 팔을 쭉 뻗으며 들어오면 맞힘
+          const key = p.id + ':' + w, d = dist(wr, p);
+          if (S.inside[key] === undefined || d > b.W * 0.6) S.inside[key] = d > b.W * 0.6 ? 'armed' : (S.inside[key] || 'armed');
+          if (d > b.W * 0.45 || S.inside[key] !== 'armed' || ext < L.ext || speed < 0.6) continue;
+          S.inside[key] = 'used';
+          if (p.n && p.n !== S.seq) { const sp = api.toScreen(p); api.pop(`${S.seq}번 먼저!`, sp.x, sp.y - 60, '#5B6170', 0.035); continue; }
+          p.done = true; p.hitT = t; S.hits++; if (p.n) S.seq++;
+          const sp = api.toScreen(p); api.pop(pick(['팡!', '퍽!', '좋아요!']), sp.x, sp.y - 60, '#F26B4F', 0.05); api.burst(sp.x, sp.y, '#FFD24D', 14); api.beep(160, 0.12, 'square', 0.1); api.beep(640, 0.08, 'triangle', 0.08, 0.03);
+        }
+      }
+    }
+    for (const p of S.pads) if (!p.done && t - p.t0 > p.life) { p.done = true; p.missT = t; S.miss++; }
+    const active = S.pads.some(p => !p.done);
+    if (S.wasActive && !active) S.next = t + rand(L.every[0], L.every[1]);   // 마지막 패드가 끝나면 잠깐 쉬고 다음 패드
+    S.wasActive = active;
+    S.pads = S.pads.filter(p => !p.done || t - (p.hitT || p.missT) < 0.4);
+    // 베개
+    if (L.pillow && t >= S.nextPillow && api.timeLeft > 2) {
+      const from = pick(['L', 'R']), nose = lm ? lm[0] : { x: b.cx, y: b.noseY };
+      S.pillows.push({ from, tx: nose.x, ty: nose.y, t0: t, arrive: t + 1.4, done: false, noseX: nose.x });
+      S.nextPillow = t + L.pillow + rand(-1, 1);
+    }
+    for (const pl of S.pillows) {
+      if (pl.done || t < pl.arrive) continue;
+      pl.done = true; pl.doneT = t;
+      const shDrop = lm ? (mid(lm[11], lm[12]).y - b.shY) / b.T : 0, side = lm ? Math.abs(lm[0].x - pl.noseX) / b.W : 0;
+      const ok = api.ducking || shDrop > 0.25 || side > 0.4 || !lm;
+      const sp = api.toScreen({ x: pl.tx, y: pl.ty });
+      if (ok) { S.dodge++; pl.ok = true; api.pop('휙! 피했다!', sp.x, sp.y - 80, '#3A7BEB', 0.05); api.beep(990, 0.1); }
+      else { S.bonk++; api.pop('퐁! 다시 해 봐요', sp.x, sp.y - 80, '#7B5CC4', 0.045); api.beep(300, 0.15, 'sine', 0.08); api.react('wow', 0.8); }
+    }
+    S.pillows = S.pillows.filter(p => !p.done || t - p.doneT < 0.6);
+    api.hud('hits', S.hits); api.hud('dodge', S.dodge);
+  },
+  draw(api, ctx, t) {
+    const u = api.unit, b = api.base, W = api.W;
+    if (api.mode !== 'play') { drawGloves(api); return; }
+    for (const p of S.pads) {
+      const s = api.toScreen(p), age = t - p.t0, pop = Math.min(1, age / 0.15);
+      const gone = p.hitT ? (t - p.hitT) / 0.4 : p.missT ? (t - p.missT) / 0.4 : 0;
+      const size = b.W * 1.15 * u * pop * (p.hitT ? 1 + gone * 0.5 : 1);
+      api.drawImg('pad', s.x, s.y, size, 0, 1 - gone);
+      if (!p.done) { const left = 1 - age / p.life; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 6; ctx.beginPath(); ctx.arc(s.x, s.y, size * 0.6, -Math.PI / 2, -Math.PI / 2 + left * Math.PI * 2); ctx.stroke(); }
+      if (p.n && !p.done) api.text(String(p.n), s.x, s.y, size * 0.45, '#F26B4F', 900);
+    }
+    for (const pl of S.pillows) {
+      const p = clamp((t - pl.t0) / (pl.arrive - pl.t0), 0, 1.3), sx = pl.from === 'L' ? -0.1 : 1.45;
+      const x = sx + (pl.tx - sx) * p, y = pl.ty - Math.sin(p * Math.PI) * 0.08;
+      const s = api.toScreen({ x, y }), a = pl.done ? Math.max(0, 1 - (t - pl.doneT) / 0.6) : 1;
+      api.drawImg('pillow', s.x, s.y, u * 0.16, p * 6, a);
+      if (!pl.done && p > 0.3) api.text('숙여요!', W / 2, api.H * 0.14, api.H * 0.06, '#7B5CC4', 900);
+    }
+    drawGloves(api);
+  },
+  result() {
+    return { stats: [[S.hits, '맞힌 패드'], [S.dodge, '피한 베개']], msg: `패드 ${S.hits + S.miss}개 중 ${S.hits}개를 맞혔어요!` };
+  },
+});
+</script>
+</body>
+</html>

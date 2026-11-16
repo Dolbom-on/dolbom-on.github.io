@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>골키퍼 막기 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, pick, dist, clamp, ASPECT } from '../../common/engine.js';
+
+const S = { balls: [], saves: 0, goals: 0, next: 0, best: 0, combo: 0 };
+// 손에 골키퍼 장갑 (손목·팔꿈치가 잘 보일 때만)
+function drawGloves(api) {
+  const lm = api.lm; if (!lm) return;
+  for (const [w, e, flip] of [[15, 13, true], [16, 14, false]]) {
+    if ((lm[w].v ?? 1) < 0.5 || (lm[e].v ?? 1) < 0.5) continue;
+    const s = api.toScreen(lm[w]); api.drawImg('glove_keeper', s.x, s.y, api.unit * 0.1, 0, 0.95, flip);
+  }
+}
+
+start({
+  id: 'goalkeeper', cat: 'tool', view: 'camera', emoji: '🧤', title: '골키퍼 막기',
+  desc: '날아오는 공을 손이나 발로 막아 골문을 지켜요.',
+  how: ['골문 가운데에 서서 무릎을 살짝 굽혀요.', '공이 오는 쪽으로 다리를 크게 내딛고 팔을 쭉 뻗어요.', '낮은 공은 손이나 발로 막아요.'],
+  tip: '공이 오는 쪽으로 쭉 뻗어요!',
+  images: ['ball', 'glove_keeper', 'star'], bg: 'bg_goal', hands: false,
+  need: [25, 26, 27, 28], needMsg: '무릎과 발끝까지 화면에 보이게 조금 뒤로 가 주세요',
+  keys: '<b>마우스</b>로 손 움직이기 · <b>← →</b> 옆으로 · <b>↓</b> 쪼그려 앉기',
+  hud: [['saves', '막은 공'], ['combo', '연속']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', travel: 2.3, gap: [1.0, 1.4], reach: [0.7, 1.1], low: false, win: 0.25, r: 0.5 },
+    mid:  { name: '중', sub: '익숙해요', travel: 1.8, gap: [0.8, 1.2], reach: [1.0, 1.4], low: true, win: 0.2, r: 0.42 },
+    hard: { name: '상', sub: '도전해요', travel: 1.4, gap: [0.6, 1.0], reach: [1.1, 1.6], low: true, win: 0.18, r: 0.36 },
+  },
+  init(api, t) { window.__S = S; Object.assign(S, { balls: [], saves: 0, goals: 0, next: t + 1, best: 0, combo: 0 }); },
+  update(api, t, dt) {
+    const L = api.L, b = api.base, lm = api.lm;
+    if (t >= S.next && !S.balls.some(x => !x.done) && api.timeLeft > L.travel + 0.3) {
+      // 표적 위치는 공을 찰 때의 기준으로 고정 (아이를 따라 움직이지 않음)
+      const side = pick([-1, 1]), height = L.low ? pick(['high', 'mid', 'low']) : pick(['high', 'mid']);
+      const y = height === 'high' ? b.shY - 0.25 * b.T : height === 'mid' ? b.shY + 0.35 * b.T : (b.ankL + b.ankR) / 2 - 0.25 * b.T;           // 낮은 공: 발목 바로 위 (발을 옆으로 내디뎌 막음)
+      const x = clamp(b.cx + side * b.W * rand(L.reach[0], L.reach[1]), 0.1, api.aspect - 0.1);
+      S.balls.push({ tx: x, ty: y, sx: api.aspect / 2 + rand(-0.1, 0.1), sy: 0.18, t0: t, arrive: t + L.travel, done: false, low: height === 'low', best: 9, spin: rand(-3, 3) });
+    }
+    for (const ball of S.balls) {
+      if (ball.done) continue;
+      // 도착 ± 창 안에서 손(발)과 가장 가까웠던 거리
+      if (lm && Math.abs(t - ball.arrive) <= L.win) {
+        const pts = [15, 16, 19, 20].concat(ball.low ? [25, 26, 27, 28, 31, 32] : []);
+        for (const i of pts) if ((lm[i].v ?? 1) >= 0.5) ball.best = Math.min(ball.best, dist(lm[i], { x: ball.tx, y: ball.ty }) / b.W);
+      }
+      if (t > ball.arrive + L.win) {
+        ball.done = true; ball.doneT = t;
+        const s = api.toScreen({ x: ball.tx, y: ball.ty });
+        if (ball.best <= L.r) { ball.saved = true; S.saves++; S.combo++; S.best = Math.max(S.best, S.combo); api.pop(S.combo >= 3 ? `${S.combo}연속 선방!` : '선방!', s.x, s.y - 60, '#1FA67A', 0.05); api.burst(s.x, s.y, '#FFD24D', 16); api.beep(784, 0.1); api.beep(1046, 0.12, 'triangle', 0.1, 0.08); }
+        else { S.goals++; S.combo = 0; api.pop('아깝다!', s.x, s.y - 60, '#5B6170', 0.045); api.beep(240, 0.18, 'sine', 0.08); }
+        S.next = t + rand(L.gap[0], L.gap[1]);
+      }
+    }
+    S.balls = S.balls.filter(x => !x.done || t - x.doneT < 0.6);
+    api.hud('saves', S.saves); api.hud('combo', S.combo);
+  },
+  draw(api, ctx, t) {
+    const u = api.unit, b = api.base;
+    if (api.mode !== 'play') { drawGloves(api); return; }
+    for (const ball of S.balls) {
+      const p = clamp((t - ball.t0) / (ball.arrive - ball.t0), 0, 1);
+      let x = ball.sx + (ball.tx - ball.sx) * p, y = ball.sy + (ball.ty - ball.sy) * p - Math.sin(p * Math.PI) * 0.06;
+      let size = (0.04 + 0.1 * p * p) * u, a = 1;
+      if (ball.done) { const k = (t - ball.doneT) / 0.6; a = 1 - k; if (ball.saved) { y -= k * 0.2; x += (ball.tx < b.cx ? -1 : 1) * k * 0.2; } else { size *= 1 + k; } }
+      const s = api.toScreen({ x, y });
+      if (!ball.done && p > 0.4) { const tg = api.toScreen({ x: ball.tx, y: ball.ty }); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 4; ctx.setLineDash([6, 8]); ctx.beginPath(); ctx.arc(tg.x, tg.y, b.W * api.L.r * u, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+      api.drawImg('ball', s.x, s.y, size * 2, t * ball.spin, a) || (ctx.fillStyle = '#fff', ctx.beginPath(), ctx.arc(s.x, s.y, size, 0, 7), ctx.fill());
+    }
+    drawGloves(api);
+  },
+  result() {
+    const total = S.saves + S.goals;
+    return { stats: [[S.saves, '막은 공'], [S.best, '최고 연속']], msg: total ? `공 ${total}개 중 ${S.saves}개를 막았어요! 🧤` : '' };
+  },
+});
+</script>
+</body>
+</html>
