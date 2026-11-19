@@ -8,7 +8,19 @@
 </head>
 <body>
 <script type="module">
-import { start, rand, pick, clamp, mid } from '../../common/engine.js';
+import { start, rand, pick, clamp, mid, CHAR_IDS } from '../../common/engine.js';
+import { drawCharSprite, SPRITE_POSES } from '../../common/scene.js';
+
+// The child is shown from behind (crossing the river) as a whole-body illustration
+function drawKid(api, ctx, t) {
+  const b = api.base, lm = api.lm; if (!b || !b.ok) return;
+  const hip = lm ? mid(lm[23], lm[24]) : { x: b.cx, y: b.hipY };
+  const ground = (b.ankL + b.ankR) / 2 + 0.02, lift = Math.max(0, b.hipY - hip.y);
+  const feet = api.toScreen({ x: hip.x, y: ground - lift }), shadow = api.toScreen({ x: hip.x, y: ground });
+  const height = (ground - b.noseY + b.T * 0.5) * api.unit;
+  const pose = S.lastMiss && t - S.lastMiss < 0.7 ? 'boops' : (api.jumping || t - S.jumpT < 0.35) ? 'bjump' : 'bstand';
+  drawCharSprite(api, ctx, pose, feet.x, feet.y, height, false, shadow.y);
+}
 
 // 1·2·3번 칸 = 화면 왼쪽·가운데·오른쪽. 몸이 어느 칸에 서 있는지는 골반 가운데 위치로 정함
 const S = { rows: [], done: 0, miss: 0, combo: 0, best: 0, courses: 0, next: 0, jumpT: -9, lastLane: 1, splash: [] };
@@ -42,7 +54,8 @@ start({
   desc: '강을 건너는 징검다리가 다가와요. 돌이 있는 칸으로 옆걸음하고, 돌이 발밑에 오면 폴짝 뛰어 건너요!',
   how: ['발밑의 1·2·3번 칸을 확인해요. 옆으로 걸어서 칸을 옮겨요.', '돌이 발밑에 닿을 때 두 발로 점프해요.', '중: O 돌만 밟아요. 상: 돌이 하나만 와요.'],
   tip: '돌이 있는 칸으로 옮겨서 폴짝!',
-  images: ['stone', 'stone_moss', 'splash', 'lilypad', 'star'], bg: 'bg_river',
+  images: ['stone', 'stone_moss', 'splash', 'lilypad', 'star', ...CHAR_IDS.flatMap(c => SPRITE_POSES.slice(3).map(p => `${c}_${p}`))], bg: 'bg_river',
+  puppet: false, chars: true,
   keys: '<b>← →</b> 칸 옮기기 · <b>스페이스</b> 점프',
   hud: [['done', '건넌 돌'], ['combo', '연속']],
   levels: {
@@ -50,7 +63,7 @@ start({
     mid:  { name: '중', sub: '익숙해요', kind: 'ox', travel: 2.6, gap: 2.0, course: 14, win: 0.28 },
     hard: { name: '상', sub: '도전해요', kind: 'one', travel: 2.0, gap: 1.6, course: 16, win: 0.25 },
   },
-  init(api, t) { window.__S = S; Object.assign(S, { rows: [], done: 0, miss: 0, combo: 0, best: 0, courses: 0, next: t + 1.0, jumpT: -9, lastLane: 1, splash: [], step: 0, cx0: api.base.cx, W0: api.base.W }); },
+  init(api, t) { window.__S = S; Object.assign(S, { rows: [], done: 0, miss: 0, combo: 0, best: 0, courses: 0, next: t + 1.0, jumpT: -9, lastLane: 1, splash: [], step: 0, lastMiss: -9, cx0: api.base.cx, W0: api.base.W }); },
   onJump(api, t) { S.jumpT = t; S.jumpLane = laneOf(api); },
   update(api, t, dt) {
     const L = api.L;
@@ -72,7 +85,7 @@ start({
         api.pop(S.combo >= 3 ? `${S.combo}연속 폴짝!` : '폴짝!', p.x, p.y - api.unit * 0.55, '#1FA67A', 0.05); api.beep(700 + Math.min(S.combo, 8) * 40, 0.1, 'triangle', 0.1); api.react('happy');
         if (S.step >= L.course) { S.courses++; S.step = 0; api.pop('강을 다 건넜어요! 🎉', api.W / 2, api.H * 0.3, '#3A7BEB', 0.07); api.burst(api.W / 2, api.H * 0.4, '#FFD24D', 20); [523, 659, 784, 1046].forEach((f, i) => api.beep(f, 0.15, 'triangle', 0.1, i * 0.1)); }
       } else {
-        S.miss++; S.combo = 0; r.ok = false; S.splash.push({ x: p.x, y: p.y, t });
+        S.miss++; S.combo = 0; r.ok = false; S.splash.push({ x: p.x, y: p.y, t }); S.lastMiss = t;
         const why = !jumped ? '점프!' : st === 'X' ? 'X 돌이에요!' : '돌이 없어요!';
         api.pop('퐁당! ' + why, p.x, p.y - api.unit * 0.55, '#3A7BEB', 0.045); api.beep(240, 0.2, 'sine', 0.1); api.react('wow');
       }
@@ -94,7 +107,7 @@ start({
       ctx.beginPath(); ctx.ellipse(p.x, p.y, b.W * u * 0.55, b.W * u * 0.16, 0, 0, 7); ctx.fill();
       api.text(String(i + 1), p.x, p.y + b.W * u * 0.32, u * 0.04, i === lane ? '#2A78D6' : '#7A8AA0', 900);
     }
-    if (api.mode !== 'play') return;
+    if (api.mode !== 'play') { drawKid(api, ctx, t); return; }
     // 다가오는 돌 (먼 것부터)
     for (const r of [...S.rows].sort((a, c) => a.arrive - c.arrive).reverse()) {
       const p = clamp((t - r.t0) / (r.arrive - r.t0), 0, 1.25);
@@ -109,6 +122,7 @@ start({
         if (s === 'O' || s === 'X') api.text(s, sp.x, sp.y - w * 0.05, w * 0.45, s === 'O' ? '#1FA67A' : '#E2585A', 900);
       });
     }
+    drawKid(api, ctx, t);           // character on top of the stones, splash on top of the character
     for (const s of S.splash) { const a = (t - s.t) / 0.8; api.drawImg('splash', s.x, s.y - u * 0.05 * a, u * 0.22 * (0.7 + a * 0.5), 0, 1 - a); }
   },
   draw(api, ctx, t) {
