@@ -36,7 +36,7 @@ export function makeScene() {
 
 // 아이 그림 (발 위치 기준). pose: run | jump | oops | duck | cheer
 export function drawKid(api, ctx, x, feetY, height, pose, t, moving = true, groundY = feetY) {
-  const pre = api.char === 'girl' && api.img('g_run1') ? 'g_' : 'kid_';     // 여자 캐릭터를 고르면 g_ 그림
+  const pre = api.char && api.img(api.char + '_run1') ? api.char + '_' : 'kid_';     // picked mascot's side-view sprites (fallback: kid_)
   const run1 = api.img(pre + 'run1');
   if (!run1) { ctx.fillStyle = '#7CC4F2'; ctx.fillRect(x - height * 0.15, feetY - height, height * 0.3, height); return; }
   let name = 'run1';

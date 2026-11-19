@@ -87,10 +87,12 @@ const PSTBASE = { size: null, roll: 0 };        // 캐릭터 크기·머리 기�
 export function puppetHeadRadius(W) { return W * 0.8; }   // 머리 그림 반지름 ≈ 어깨너비×0.8 (테트리스 구멍과 맞춤)
 
 // ─── 그림 조각 캐릭터 (Codex 그림): 몸통·위팔·아래팔·손·허벅지·정강이·신발 조각을 관절 사이에 놓고 돌림 ───
-const PART_NAMES = ['torso', 'uarm', 'farm', 'hand', 'thigh', 'shin', 'shoe'];
-export const PUPPET_IMAGES = ['head_happy', 'head_wow', 'head_focus', 'ghead_happy', 'ghead_wow', 'ghead_focus',
-  ...['boy', 'girl'].flatMap(c => PART_NAMES.map(p => `${c}_${p}`))];
-const headName = (char, face) => (char === 'girl' ? 'ghead_' : 'head_') + face;
+// Animal mascot characters (picked on the start screen). Image files: <id>_<part>.png, <id>_head_<face>.png, <id>_<run1|run2|jump|oops|cheer>.png
+export const CHARS = [{ id: 'bear', name: '곰돌이' }, { id: 'rabbit', name: '토끼' }, { id: 'puppy', name: '강아지' }, { id: 'cat', name: '고양이' }];
+export const CHAR_IDS = CHARS.map(c => c.id);
+const PART_NAMES = ['torso', 'uarm', 'farm', 'hand', 'thigh', 'shin', 'foot'];
+export const PUPPET_IMAGES = CHAR_IDS.flatMap(c => [...PART_NAMES.map(p => `${c}_${p}`), ...['happy', 'wow', 'focus'].map(f => `${c}_head_${f}`)]);
+const headName = (char, face) => `${char}_head_${face}`;
 // 같은 캐릭터를 둘이 고르면 두 번째 친구 옷 색만 바꿈 (옷 색 범위의 픽셀만 색상 회전, 한 번 만들어 둠)
 const ALTC = new Map();
 function altImage(im, cloth) {
@@ -129,8 +131,8 @@ function drawSeg(ctx, im, m, A, B, k, flip = false, fixedLen = false) {
   ctx.restore();
 }
 export function drawPuppet(ctx, P, map, opt = {}) {
-  const char = opt.char === 'girl' ? 'girl' : 'boy', meta = CHAR_PARTS[char], imgs = opt.imgs || {};
-  const im = (p) => { const x = imgs[`${char}_${p}`]; return x && opt.alt && meta && /torso|uarm|thigh|shoe/.test(p) ? altImage(x, meta.cloth) : x; };
+  const char = CHAR_IDS.includes(opt.char) ? opt.char : CHAR_IDS[0], meta = CHAR_PARTS[char], imgs = opt.imgs || {};
+  const im = (p) => { const x = imgs[`${char}_${p}`]; return x && opt.alt && meta && /torso|uarm|thigh/.test(p) ? altImage(x, meta.cloth) : x; };
   if (!meta || PART_NAMES.some(p => !imgs[`${char}_${p}`])) return drawPuppetVector(ctx, P, map, opt);
   const PST = opt.state || PSTBASE;
   const S = (i) => map(P[i]);
@@ -155,8 +157,8 @@ export function drawPuppet(ctx, P, map, opt = {}) {
     if (!ok(ki)) continue;
     const h = S(hi), kn = S(ki);
     if (ok(ai)) {
-      const a = S(ai), left = isLeft(a), sm = meta.shoe;
-      const sw = im('shoe'), shk = kS;
+      const a = S(ai), left = isLeft(a), sm = meta.foot;
+      const sw = im('foot'), shk = kS * (meta.footK || 1);
       ctx.save(); ctx.translate(a.x, a.y); if (left) ctx.scale(-1, 1);
       ctx.drawImage(sw, -sm.p1[0] * shk, -sm.p1[1] * shk, sw.width * shk, sw.height * shk); ctx.restore();
       drawSeg(ctx, im('shin'), meta.shin, kn, a, kL, left);
@@ -187,8 +189,9 @@ export function drawPuppet(ctx, P, map, opt = {}) {
     const r = Math.max(-0.4, Math.min(0.4, Math.atan2(eR.y - eL.y, eR.x - eL.x)));
     PST.roll += (r - PST.roll) * 0.2;
   } else PST.roll *= 0.9;
+  // headScale: image width vs. hole size; headY: where the face centre sits in the image (0 = top, 1 = bottom), ears stick out above
   if (hi) { const hw = puppetHeadRadius(Wd) * 2 * (meta.headScale || 1), hh = hw * hi.height / hi.width, hc = { x: head.x, y: head.y - Wd * 0.1 };
-    ctx.save(); ctx.translate(hc.x, hc.y); ctx.rotate(PST.roll); ctx.drawImage(hi, -hw / 2, -hh * 0.55, hw, hh); ctx.restore(); }
+    ctx.save(); ctx.translate(hc.x, hc.y); ctx.rotate(PST.roll); ctx.drawImage(hi, -hw / 2, -hh * (meta.headY || 0.55), hw, hh); ctx.restore(); }
   // 팔: 손 → 아래팔 → 위팔 (머리보다 나중: 얼굴 앞의 손이 보이게)
   for (const [si, ei, wi] of [[11, 13, 15], [12, 14, 16]]) {
     const s = S(si);
@@ -196,7 +199,7 @@ export function drawPuppet(ctx, P, map, opt = {}) {
     const e = S(ei), left = isLeft(s);
     if (ok(wi)) {
       const w = S(wi);
-      if (opt.hands !== false) drawSeg(ctx, im('hand'), meta.hand, w, { x: w.x + (w.x - e.x), y: w.y + (w.y - e.y) }, k * 0.9, !left, true);
+      if (opt.hands !== false) drawSeg(ctx, im('hand'), meta.hand, w, { x: w.x + (w.x - e.x), y: w.y + (w.y - e.y) }, kA * (meta.handK || 1), !left, true);
       drawSeg(ctx, im('farm'), meta.farm, e, w, kA, left);
     }
     drawSeg(ctx, im('uarm'), meta.uarm, s, e, kA, left);
@@ -389,8 +392,9 @@ export function start(cfg) {
   const showChar = (view === 'camera' && cfg.puppet !== false) || view === 'scene';
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
-  const CH = [lsGet('dolbom-char1') === 'girl' ? 'girl' : 'boy', lsGet('dolbom-char2') === 'boy' ? 'boy' : 'girl'];
-  if (params.get('char') === 'girl' || params.get('char') === 'boy') CH[0] = params.get('char');
+  const pickOk = (v, d) => CHAR_IDS.includes(v) ? v : d;
+  const CH = [pickOk(lsGet('dolbom-char1'), 'bear'), pickOk(lsGet('dolbom-char2'), 'rabbit')];
+  CH[0] = pickOk(params.get('char'), CH[0]);
 
   document.title = `${cfg.title} · 돌봄놀이터 온(ON)`;
   document.body.className = 'cat-' + (cfg.cat || 'run');
@@ -437,7 +441,7 @@ export function start(cfg) {
   const IMG = {};
   const imgList = [...(cfg.images || []),
     ...(view === 'camera' && cfg.puppet !== false ? PUPPET_IMAGES : []),
-    ...(view === 'scene' ? (cfg.images || []).filter(n => /^kid_(run1|run2|jump|oops|cheer)$/.test(n)).map(n => 'g_' + n.slice(4)) : [])];   // 여자 캐릭터 달리기 그림
+    ...(view === 'scene' ? (cfg.images || []).filter(n => /^kid_(run1|run2|jump|oops|cheer)$/.test(n)).flatMap(n => CHAR_IDS.map(c => `${c}_${n.slice(4)}`)) : [])];   // side-view sprites of each character
   const loads = [];
   const load = (src, ok) => loads.push(new Promise(res => { const im = new Image(); im.onload = () => { ok(im); res(); }; im.onerror = () => res(); im.src = src; }));
   imgList.forEach(n => load(ART + n + '.png', im => { IMG[n] = im; }));
@@ -923,12 +927,12 @@ export function start(cfg) {
       const u = new URL(location.href); if (duo) u.searchParams.set('duo', '1'); else u.searchParams.delete('duo'); history.replaceState(null, '', u);
     });
   }
-  // 남자 / 여자 캐릭터 고르기 (둘이 할 때는 화면 왼쪽·오른쪽 친구 따로)
+  // Character picker (two players: separate rows for the left / right friend)
   function renderChar() {
     const box = $('char-pick'); if (!box) return;
     box.className = 'lv char' + (duo ? ' two' : '');
-    const opt = (slot) => [['boy', '남자'], ['girl', '여자']].map(([v, n]) =>
-      `<button data-s="${slot}" data-v="${v}" aria-pressed="${CH[slot] === v}"><img src="${ART}${v === 'girl' ? 'ghead_happy' : 'head_happy'}.png" alt="" width="42" height="42">${n}</button>`).join('');
+    const opt = (slot) => CHARS.map(({ id: v, name: n }) =>
+      `<button data-s="${slot}" data-v="${v}" aria-pressed="${CH[slot] === v}"><img src="${ART}${v}_head_happy.png" alt="" width="42" height="42">${n}</button>`).join('');
     box.innerHTML = duo ? `<span class="who">왼쪽 친구</span>${opt(0)}<span class="who">오른쪽 친구</span>${opt(1)}` : opt(0);
     box.querySelectorAll('button').forEach(b => b.onclick = () => {
       const s = +b.dataset.s; CH[s] = b.dataset.v; lsSet('dolbom-char' + (s + 1), CH[s]); renderChar();
