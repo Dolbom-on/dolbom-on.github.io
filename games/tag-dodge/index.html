@@ -13,15 +13,21 @@ import { drawCharSprite, SPRITE_POSES } from '../../common/scene.js';
 
 const S = { ghosts: [], dodged: 0, caught: 0, combo: 0, best: 0, inv: -9, next: 0, px: null, vx: 0, face: 1 };
 
-// The child is shown as a whole-body illustration (front view) standing where the child stands
-function drawKid(api, ctx, t) {
-  const b = api.base, lm = api.lm; if (!b || !b.ok) return;
+// The child is shown as a whole-body illustration (front view) standing where the child stands.
+// SCALE: sprite height relative to the child's real body height. Ghost hits are judged against this sprite, not the real body.
+const SCALE = 0.5;
+function kidBox(api) {             // in camera units: x, feet (bottom), top, h
+  const b = api.base, lm = api.lm;
   const hip = lm ? mid(lm[23], lm[24]) : { x: b.cx, y: b.hipY };
   const ground = (b.ankL + b.ankR) / 2 + 0.01, lift = Math.max(0, b.hipY - hip.y);
-  const feet = api.toScreen({ x: hip.x, y: ground - lift }), shadow = api.toScreen({ x: hip.x, y: ground });
-  const height = (ground - b.noseY + b.T * 0.5) * api.unit;
+  const h = (ground - b.noseY + b.T * 0.5) * SCALE, feet = ground - lift;
+  return { x: hip.x, feet, ground, top: feet - h, h };
+}
+function drawKid(api, ctx, t) {
+  const b = api.base; if (!b || !b.ok) return;
+  const k = kidBox(api), feet = api.toScreen({ x: k.x, y: k.feet }), shadow = api.toScreen({ x: k.x, y: k.ground });
   const pose = t - S.inv < 0.8 ? 'foops' : Math.abs(S.vx) > 0.25 ? 'fstep' : 'fstand';
-  drawCharSprite(api, ctx, pose, feet.x, feet.y, height, pose === 'fstep' && S.face < 0, shadow.y);
+  drawCharSprite(api, ctx, pose, feet.x, feet.y, k.h * api.unit, pose === 'fstep' && S.face < 0, shadow.y);
 }
 
 start({
@@ -51,7 +57,8 @@ start({
       S.ghosts.push({ x, y: -0.12, t0: t, img: pick(['ghost1', 'ghost2']), locked: false, touch: 0, done: false, wob: rand(0, 6) });
       S.next = t + rand(L.every[0], L.every[1]);
     }
-    const headY = b.noseY, hitY = b.hipY + 0.05;          // 유령이 이 높이를 지나면 판정 끝
+    const kb = kidBox(api);
+    const headY = kb.ground - kb.h + 0.1, hitY = kb.ground - kb.h * 0.1;   // ghost reaches the sprite's head ... passes its feet = dodged
     for (const g of S.ghosts) {
       if (g.done) continue;
       const p = (t - g.t0) / L.fall;                       // 0 → 1 이 골반 지점 도착
@@ -60,10 +67,10 @@ start({
       const headP = (headY - 0.1 + 0.12) / (hitY + 0.12);   // 유령이 머리에 닿기 시작하는 진행도
       if (!g.locked && (headP - p) * L.fall > L.lock) g.x += (bodyX - g.x) * (1 - Math.exp(-dt / 0.9));
       else g.locked = true;
-      // 닿았는지: 머리 원 + 몸통 캡슐
+      // touching = ghost overlaps the character drawn on screen (vertical capsule through the sprite's head and body)
       if (lm && t - S.inv > 1) {
-        const R = 0.055, head = lm[0], sh = mid(lm[11], lm[12]), hip = mid(lm[23], lm[24]);
-        const touching = dist(g, head) < b.W * 0.5 + R || segDist(g, sh, hip) < b.W * 0.55 + R;
+        const R = 0.045, top = { x: kb.x, y: kb.top + kb.h * 0.22 }, bot = { x: kb.x, y: kb.feet - kb.h * 0.2 };
+        const touching = segDist(g, top, bot) < kb.h * 0.2 + R;
         g.touch = touching ? g.touch + dt : 0;
         if (g.touch >= 0.1) {
           g.done = true; g.caught = t; S.caught++; S.combo = 0; S.inv = t;
@@ -88,7 +95,7 @@ start({
       if (!api.drawImg(g.img, s.x, s.y + (g.passed ? age * u * 0.3 : 0), u * 0.16 * (g.caught ? 1 + age : 1), wob, alpha)) {
         ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.beginPath(); ctx.arc(s.x, s.y, u * 0.06, 0, 7); ctx.fill();
       }
-      if (!g.done && g.locked) { ctx.strokeStyle = 'rgba(123,92,196,.35)'; ctx.setLineDash([8, 8]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(s.x, s.y + u * 0.08); ctx.lineTo(s.x, api.toScreen({ x: 0, y: api.base.hipY }).y); ctx.stroke(); ctx.setLineDash([]); }
+      if (!g.done && g.locked) { ctx.strokeStyle = 'rgba(123,92,196,.35)'; ctx.setLineDash([8, 8]); ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(s.x, s.y + u * 0.08); ctx.lineTo(s.x, api.toScreen({ x: 0, y: kidBox(api).ground }).y); ctx.stroke(); ctx.setLineDash([]); }
     }
     if (t - S.inv < 1) api.text('잠깐 무적!', api.W / 2, api.H * 0.2, api.H * 0.04, '#7B5CC4');
   },
