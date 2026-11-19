@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>징검다리 건너기 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, rand, pick, clamp, mid } from '../../common/engine.js';
+
+// 1·2·3번 칸 = 화면 왼쪽·가운데·오른쪽. 몸이 어느 칸에 서 있는지는 골반 가운데 위치로 정함
+const S = { rows: [], done: 0, miss: 0, combo: 0, best: 0, courses: 0, next: 0, jumpT: -9, lastLane: 1, splash: [] };
+const LANE = 1.2;                      // 칸 사이 간격 (어깨너비의 몇 배)
+// 칸 기준(가운데·너비)은 판을 시작할 때 고정 — 옆 칸에 오래 서 있어도 기준이 따라가지 않게
+function laneOf(api) {
+  const lm = api.lm; if (!lm || S.cx0 === undefined) return S.lastLane;
+  const dx = (mid(lm[23], lm[24]).x - S.cx0) / S.W0 / LANE;          // 칸 단위
+  // 경계에서 흔들려도 칸이 바뀌지 않게: 지금 칸에서 0.65칸 넘게 벗어나야 옆 칸으로
+  const cur = S.lastLane - 1;
+  if (Math.abs(dx - cur) > 0.65) S.lastLane = Math.max(0, Math.min(2, Math.round(dx) + 1));
+  return S.lastLane;
+}
+function laneX(api, i) { return (S.cx0 ?? api.base.cx) + (i - 1) * LANE * (S.W0 ?? api.base.W); }
+function makeRow(api) {
+  const L = api.L;
+  if (L.kind === 'gap') {                         // 하: 세 칸 중 한 칸이 빠지기도 함
+    const pat = pick([[1, 1, 1], [1, 0, 1], [0, 1, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 0]]);
+    return pat.map(v => (v ? 'ok' : null));
+  }
+  if (L.kind === 'ox') {                          // 중: 두 칸만 오고 하나는 O, 하나는 X
+    const lanes = [0, 1, 2].sort(() => Math.random() - 0.5).slice(0, 2), o = pick(lanes);
+    return [0, 1, 2].map(i => (i === o ? 'O' : lanes.includes(i) ? 'X' : null));
+  }
+  const one = pick([0, 1, 2]);                    // 상: 한 칸만
+  return [0, 1, 2].map(i => (i === one ? 'ok' : null));
+}
+
+start({
+  id: 'stone-bridge', cat: 'run', view: 'camera', emoji: '🪨', title: '징검다리 건너기',
+  desc: '강을 건너는 징검다리가 다가와요. 돌이 있는 칸으로 옆걸음하고, 돌이 발밑에 오면 폴짝 뛰어 건너요!',
+  how: ['발밑의 1·2·3번 칸을 확인해요. 옆으로 걸어서 칸을 옮겨요.', '돌이 발밑에 닿을 때 두 발로 점프해요.', '중: O 돌만 밟아요. 상: 돌이 하나만 와요.'],
+  tip: '돌이 있는 칸으로 옮겨서 폴짝!',
+  images: ['stone', 'stone_moss', 'splash', 'lilypad', 'star'], bg: 'bg_river',
+  keys: '<b>← →</b> 칸 옮기기 · <b>스페이스</b> 점프',
+  hud: [['done', '건넌 돌'], ['combo', '연속']],
+  levels: {
+    easy: { name: '하', sub: '처음 해요', kind: 'gap', travel: 3.0, gap: 2.2, course: 12, win: 0.32 },
+    mid:  { name: '중', sub: '익숙해요', kind: 'ox', travel: 2.6, gap: 2.0, course: 14, win: 0.28 },
+    hard: { name: '상', sub: '도전해요', kind: 'one', travel: 2.0, gap: 1.6, course: 16, win: 0.25 },
+  },
+  init(api, t) { window.__S = S; Object.assign(S, { rows: [], done: 0, miss: 0, combo: 0, best: 0, courses: 0, next: t + 1.0, jumpT: -9, lastLane: 1, splash: [], step: 0, cx0: api.base.cx, W0: api.base.W }); },
+  onJump(api, t) { S.jumpT = t; S.jumpLane = laneOf(api); },
+  update(api, t, dt) {
+    const L = api.L;
+    const lane = laneOf(api);
+    if (t >= S.next && api.timeLeft > L.travel + 0.3) {
+      S.rows.push({ stones: makeRow(api), t0: t, arrive: t + L.travel, judged: false, lily: Math.random() < 0.5 ? rand(-1, 1) : null });
+      S.next = t + L.gap;
+    }
+    for (const r of S.rows) {
+      if (r.judged || t < r.arrive + L.win) continue;     // 늦은 점프까지 다 본 뒤 판정
+      // 돌이 발밑에 온 때(앞뒤 짧은 시간) 점프했는지 + 그때 선 칸에 밟을 수 있는 돌이 있는지
+      r.judged = true;
+      const jumped = S.jumpT > r.arrive - L.win - 0.15 && S.jumpT <= r.arrive + L.win;
+      const at = jumped ? S.jumpLane : lane, st = r.stones[at];        // 점프한 순간에 서 있던 칸으로만 판정
+      const good = (s) => s === 'ok' || s === 'O';
+      const p = api.toScreen({ x: laneX(api, at), y: (api.base.ankL + api.base.ankR) / 2 });
+      if (jumped && good(st)) {
+        S.done++; S.combo++; S.best = Math.max(S.best, S.combo); S.step++; r.ok = true;
+        api.pop(S.combo >= 3 ? `${S.combo}연속 폴짝!` : '폴짝!', p.x, p.y - api.unit * 0.55, '#1FA67A', 0.05); api.beep(700 + Math.min(S.combo, 8) * 40, 0.1, 'triangle', 0.1); api.react('happy');
+        if (S.step >= L.course) { S.courses++; S.step = 0; api.pop('강을 다 건넜어요! 🎉', api.W / 2, api.H * 0.3, '#3A7BEB', 0.07); api.burst(api.W / 2, api.H * 0.4, '#FFD24D', 20); [523, 659, 784, 1046].forEach((f, i) => api.beep(f, 0.15, 'triangle', 0.1, i * 0.1)); }
+      } else {
+        S.miss++; S.combo = 0; r.ok = false; S.splash.push({ x: p.x, y: p.y, t });
+        const why = !jumped ? '점프!' : st === 'X' ? 'X 돌이에요!' : '돌이 없어요!';
+        api.pop('퐁당! ' + why, p.x, p.y - api.unit * 0.55, '#3A7BEB', 0.045); api.beep(240, 0.2, 'sine', 0.1); api.react('wow');
+      }
+    }
+    S.rows = S.rows.filter(r => t - r.arrive < 0.8);
+    S.splash = S.splash.filter(s => t - s.t < 0.8);
+    api.hud('done', S.done); api.hud('combo', S.combo);
+  },
+  // 돌·물결은 캐릭터 뒤(발밑)에 그림
+  drawBack(api, ctx, t) {
+    if (api.mode !== 'play' && api.mode !== 'countdown') return;
+    const L = api.L, b = api.base, u = api.unit;
+    const feetY = (b.ankL + b.ankR) / 2 + 0.02, horizon = 0.3, vx = api.aspect / 2;
+    // 발밑 1·2·3번 칸 표시
+    const lane = laneOf(api);
+    for (let i = 0; i < 3; i++) {
+      const p = api.toScreen({ x: laneX(api, i), y: feetY });
+      ctx.fillStyle = i === lane ? 'rgba(255,255,255,.55)' : 'rgba(255,255,255,.22)';
+      ctx.beginPath(); ctx.ellipse(p.x, p.y, b.W * u * 0.55, b.W * u * 0.16, 0, 0, 7); ctx.fill();
+      api.text(String(i + 1), p.x, p.y + b.W * u * 0.32, u * 0.04, i === lane ? '#2A78D6' : '#7A8AA0', 900);
+    }
+    if (api.mode !== 'play') return;
+    // 다가오는 돌 (먼 것부터)
+    for (const r of [...S.rows].sort((a, c) => a.arrive - c.arrive).reverse()) {
+      const p = clamp((t - r.t0) / (r.arrive - r.t0), 0, 1.25);
+      const k = p * p, y = horizon + (feetY - horizon) * k + (p > 1 ? (p - 1) * 0.3 : 0), sc = 0.15 + 0.85 * k;
+      const alpha = p > 1 ? Math.max(0, 1 - (p - 1) * 4) : Math.min(1, p * 4);
+      if (r.lily !== null) api.drawImg('lilypad', api.toScreen({ x: vx + (r.lily * 2.4) * b.W * sc, y }).x, api.toScreen({ x: 0, y }).y, b.W * u * 0.9 * sc, 0, alpha * 0.9);
+      r.stones.forEach((s, i) => {
+        if (!s) return;
+        const sp = api.toScreen({ x: vx + (laneX(api, i) - vx) * k, y });      // 멀리선 가운데, 가까워질수록 자기 칸으로
+        const w = b.W * u * 1.05 * sc;
+        if (!api.drawImg(s === 'X' ? 'stone_moss' : 'stone', sp.x, sp.y, w, 0, alpha)) { ctx.fillStyle = '#C9BBA8'; ctx.beginPath(); ctx.ellipse(sp.x, sp.y, w / 2, w / 4, 0, 0, 7); ctx.fill(); }
+        if (s === 'O' || s === 'X') api.text(s, sp.x, sp.y - w * 0.05, w * 0.45, s === 'O' ? '#1FA67A' : '#E2585A', 900);
+      });
+    }
+    for (const s of S.splash) { const a = (t - s.t) / 0.8; api.drawImg('splash', s.x, s.y - u * 0.05 * a, u * 0.22 * (0.7 + a * 0.5), 0, 1 - a); }
+  },
+  draw(api, ctx, t) {
+    if (api.mode !== 'play') return;
+    const L = api.L, W = api.W, H = api.H;
+    // 건너는 정도 (강 건너편까지)
+    const x0 = W * 0.3, x1 = W * 0.7, y = H * 0.12, k = S.step / L.course;
+    ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 16; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+    ctx.strokeStyle = '#7CC4F2'; ctx.lineWidth = 10; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + (x1 - x0) * k, y); ctx.stroke();
+    api.text('🏁', x1 + 26, y, H * 0.035);
+    if (L.kind === 'ox') api.text('O 돌만 밟아요!', W / 2, H * 0.19, H * 0.04, '#1FA67A', 900);
+  },
+  result() {
+    const total = S.done + S.miss;
+    return { stats: [[S.done, '건넌 돌'], [S.courses, '건넌 강'], [S.best, '최고 연속']], msg: total ? `돌 ${total}개 중 ${S.done}개를 건넜어요!` : '' };
+  },
+});
+</script>
+</body>
+</html>
