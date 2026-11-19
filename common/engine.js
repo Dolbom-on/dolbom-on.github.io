@@ -79,10 +79,13 @@ export function buildBody(def = {}) {
 }
 
 // ─────────── 그림 캐릭터: 몸 점 33개를 따라 움직이는 아이 (매뉴얼 그림체 색) ───────────
-const PC = { line: '#7A5442', skin: '#FBDCC6', skinShade: '#F3C9AE', shirt: '#7CC4F2', shirtShade: '#62B0E4', shorts: '#C5C9CF', sock: '#FFFFFF', shoe: '#3E6FD0', hair: '#5A3A26' };
-const PST = { size: null, roll: 0 };            // 캐릭터 크기·머리 기울기 (부드럽게)
+const PCBASE = { line: '#7A5442', skin: '#FBDCC6', skinShade: '#F3C9AE', shirt: '#7CC4F2', shirtShade: '#62B0E4', shorts: '#C5C9CF', sock: '#FFFFFF', shoe: '#3E6FD0', hair: '#5A3A26' };
+export const SHIRT2 = { shirt: '#F59AA0', shirtShade: '#E9808A' };   // 두 번째 친구 옷 색
+const PSTBASE = { size: null, roll: 0 };        // 캐릭터 크기·머리 기울기 (부드럽게)
 export function puppetHeadRadius(W) { return W * 0.8; }   // 머리 그림 반지름 ≈ 어깨너비×0.8 (테트리스 구멍과 맞춤)
 export function drawPuppet(ctx, P, map, opt = {}) {
+  const PC = opt.colors ? { ...PCBASE, ...opt.colors } : PCBASE;
+  const PST = opt.state || PSTBASE;
   const S = (i) => map(P[i]);
   const ok = (i) => P[i] && Number.isFinite(P[i].x) && Number.isFinite(P[i].y) && (P[i].v ?? 1) >= 0.5;
   const sL = S(11), sR = S(12), hL = S(23), hR = S(24);
@@ -90,54 +93,122 @@ export function drawPuppet(ctx, P, map, opt = {}) {
   let Wd = Math.max(8, Math.hypot(sR.x - sL.x, sR.y - sL.y));
   if (opt.refW) Wd = Math.max(opt.refW * 0.75, Math.min(opt.refW * 1.3, Wd));
   PST.size = PST.size == null ? Wd : PST.size + (Wd - PST.size) * 0.25; Wd = PST.size;
-  const lw = Math.max(1.5, Wd * 0.035);
+  const lw = Math.max(1.5, Wd * 0.03);
   const lerp = (a, b, k) => ({ x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k });
   const away = (a, b, k) => ({ x: a.x + (a.x - b.x) * k, y: a.y + (a.y - b.y) * k });
-  const seg = (pts, w, color, outline = true) => {
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-    if (outline) { ctx.strokeStyle = PC.line; ctx.lineWidth = w + lw * 2; ctx.stroke(); }
-    ctx.strokeStyle = color; ctx.lineWidth = w; ctx.stroke();
+  const tex = paperTexture(ctx);
+  // 칠하기: 바탕색 → 종이 질감 → 색연필 테두리
+  const paint = (fill, outline = true) => {
+    ctx.fillStyle = fill; ctx.fill();
+    if (tex) { ctx.fillStyle = tex; ctx.fill(); }
+    if (outline) { ctx.strokeStyle = PC.line; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.stroke(); }
   };
+  // 팔다리: 마디마다 굵기가 다른 부드러운 관 모양 (관절은 둥글게 이어짐)
+  const limb = (pts, ws) => {
+    const n = pts.length, Lp = [], Rp = [], ang = [];
+    for (let i = 0; i < n; i++) {
+      let nx = 0, ny = 0;
+      for (const [a, b] of [[i - 1, i], [i, i + 1]]) {
+        if (a < 0 || b >= n) continue;
+        const dx = pts[b].x - pts[a].x, dy = pts[b].y - pts[a].y, l = Math.hypot(dx, dy) || 1;
+        nx += -dy / l; ny += dx / l;
+      }
+      const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+      Lp.push({ x: pts[i].x + nx * ws[i] / 2, y: pts[i].y + ny * ws[i] / 2 });
+      Rp.push({ x: pts[i].x - nx * ws[i] / 2, y: pts[i].y - ny * ws[i] / 2 });
+      ang.push(Math.atan2(ny, nx));
+    }
+    ctx.beginPath(); ctx.moveTo(Lp[0].x, Lp[0].y);
+    if (n === 3) ctx.quadraticCurveTo(Lp[1].x, Lp[1].y, Lp[2].x, Lp[2].y); else ctx.lineTo(Lp[n - 1].x, Lp[n - 1].y);
+    ctx.arc(pts[n - 1].x, pts[n - 1].y, ws[n - 1] / 2, ang[n - 1], ang[n - 1] + Math.PI, true);      // 끝(손목·발목 쪽)은 둥글게
+    if (n === 3) ctx.quadraticCurveTo(Rp[1].x, Rp[1].y, Rp[0].x, Rp[0].y); else ctx.lineTo(Rp[0].x, Rp[0].y);
+    ctx.arc(pts[0].x, pts[0].y, ws[0] / 2, ang[0] + Math.PI, ang[0], true);                        // 시작(어깨·엉덩이 쪽)도 둥글게
+    ctx.closePath();
+  };
+  const oval = (c, rx, ry, rot) => { ctx.beginPath(); ctx.ellipse(c.x, c.y, rx, ry, rot, 0, Math.PI * 2); };
+
   // 바닥 그림자 (두 발목이 보일 때만)
   const aL = S(27), aR = S(28);
-  if (ok(27) && ok(28)) { const fy = Math.max(aL.y, aR.y) + Wd * 0.12;
-    ctx.fillStyle = 'rgba(70,90,60,.16)'; ctx.beginPath(); ctx.ellipse((aL.x + aR.x) / 2, fy, Wd * 1.1, Wd * 0.18, 0, 0, 7); ctx.fill(); }
-  // 다리: 반바지(위쪽) · 살 · 양말 · 신발 — 보이는 마디까지만
-  for (const [hi, ki, ai, fi] of [[23, 25, 27, 31], [24, 26, 28, 32]]) {
-    const h = S(hi), k = S(ki), a = S(ai), f = S(fi);
-    if (ok(ki)) {
-      if (ok(ai)) { seg([h, k, a], Wd * 0.4, PC.skin); seg([lerp(k, a, 0.62), a], Wd * 0.36, PC.sock, false); }
-      else seg([h, k], Wd * 0.4, PC.skin);
-      seg([h, lerp(h, k, 0.45)], Wd * 0.52, PC.shorts);
-    }
-    if (ok(ki) && ok(ai)) {
-      const dir = ok(fi) ? Math.atan2(f.y - a.y, f.x - a.x) : 0, sx = a.x + Math.cos(dir) * Wd * 0.08, sy = a.y + Wd * 0.06;
-      ctx.fillStyle = PC.shoe; ctx.strokeStyle = PC.line; ctx.lineWidth = lw;
-      ctx.beginPath(); ctx.ellipse(sx, sy, Wd * 0.26, Wd * 0.13, Math.abs(dir) < Math.PI / 2 ? 0.1 : -0.1, 0, 7); ctx.fill(); ctx.stroke();
-    }
+  if (ok(27) && ok(28)) { ctx.fillStyle = 'rgba(70,90,60,.16)'; oval({ x: (aL.x + aR.x) / 2, y: Math.max(aL.y, aR.y) + Wd * 0.14 }, Wd * 1.05, Wd * 0.17, 0); ctx.fill(); }
+
+  // 다리 (살 → 양말 → 신발) — 보이는 마디까지만
+  const legs = [[23, 25, 27, 31, hL, hR], [24, 26, 28, 32, hR, hL]];
+  for (const [hi, ki, ai, fi, h, other] of legs) {
+    if (!ok(ki)) continue;
+    const top = away(h, other, 0.05), k = S(ki), a = S(ai);
+    if (ok(ai)) {
+      limb([top, k, a], [Wd * 0.44, Wd * 0.34, Wd * 0.27]); paint(PC.skin);
+      limb([lerp(k, a, 0.6), a], [Wd * 0.3, Wd * 0.29]); paint(PC.sock);
+      const f = ok(fi) ? S(fi) : { x: a.x + (a.x < (hL.x + hR.x) / 2 ? -1 : 1) * Wd * 0.2, y: a.y + Wd * 0.05 };
+      const dir = Math.atan2(f.y - a.y, f.x - a.x), side = Math.cos(dir) < 0 ? -1 : 1;
+      const toe = { x: a.x + side * Wd * 0.12, y: a.y + Wd * 0.1 };
+      ctx.beginPath(); ctx.ellipse(toe.x, toe.y, Wd * 0.27, Wd * 0.14, side * 0.12, 0, Math.PI * 2); paint(PC.shoe);
+      ctx.beginPath(); ctx.moveTo(toe.x - Wd * 0.24, toe.y + Wd * 0.07); ctx.quadraticCurveTo(toe.x, toe.y + Wd * 0.14, toe.x + Wd * 0.24, toe.y + Wd * 0.07);
+      ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = lw * 0.9; ctx.stroke();                   // 밑창 선
+    } else { limb([top, k], [Wd * 0.44, Wd * 0.34]); paint(PC.skin); }
   }
-  // 반바지 허리
-  const hipW = Math.hypot(hR.x - hL.x, hR.y - hL.y);
-  const pL = away(hL, hR, 0.35), pR = away(hR, hL, 0.35);
-  ctx.fillStyle = PC.shorts; ctx.strokeStyle = PC.line; ctx.lineWidth = lw;
-  ctx.beginPath(); ctx.moveTo(pL.x, pL.y - Wd * 0.12); ctx.lineTo(pR.x, pR.y - Wd * 0.12); ctx.lineTo(pR.x, pR.y + Wd * 0.2); ctx.lineTo(pL.x, pL.y + Wd * 0.2); ctx.closePath(); ctx.fill(); ctx.stroke();
-  // 목 (코가 잘 안 보이면 어깨 위쪽으로 머리 위치를 정함)
+  // 반바지: 허리 띠 + 양쪽 바짓가랑이 (한 덩어리처럼 보이게 테두리 먼저, 색 나중)
+  const shortsParts = [];
+  for (const [hi, ki, , , h, other] of legs) if (ok(ki)) shortsParts.push([away(h, other, 0.04), lerp(h, S(ki), 0.4)]);
+  const waistL = away(hL, hR, 0.2), waistR = away(hR, hL, 0.2);
+  const pelvis = () => { ctx.beginPath(); ctx.moveTo(waistL.x, waistL.y - Wd * 0.14); ctx.lineTo(waistR.x, waistR.y - Wd * 0.14);
+    ctx.quadraticCurveTo(waistR.x + Wd * 0.03, waistR.y + Wd * 0.12, waistR.x - Wd * 0.04, waistR.y + Wd * 0.26);
+    ctx.lineTo(waistL.x + Wd * 0.04, waistL.y + Wd * 0.26); ctx.quadraticCurveTo(waistL.x - Wd * 0.03, waistL.y + Wd * 0.12, waistL.x, waistL.y - Wd * 0.14); ctx.closePath(); };
+  ctx.strokeStyle = PC.line; ctx.lineWidth = lw * 3;
+  for (const [a, b] of shortsParts) { limb([a, b], [Wd * 0.5, Wd * 0.46]); ctx.stroke(); }
+  pelvis(); ctx.stroke();
+  for (const [a, b] of shortsParts) { limb([a, b], [Wd * 0.5, Wd * 0.46]); paint(PC.shorts, false); }
+  pelvis(); paint(PC.shorts, false);
+
+  // 목
   const neckB = lerp(sL, sR, 0.5);
   const up = { x: (sL.y - sR.y), y: -(sR.x - sL.x) }, ul = Math.hypot(up.x, up.y) || 1;   // 어깨선에 수직인 위쪽
   const head = ok(0) ? S(0) : { x: neckB.x + up.x / ul * Wd * 0.75, y: neckB.y + up.y / ul * Wd * 0.75 };
-  seg([neckB, lerp(neckB, head, 0.45)], Wd * 0.26, PC.skin);
-  // 몸통 (티셔츠)
-  const tL = away(sL, sR, 0.08), tR = away(sR, sL, 0.08), bL = away(hL, hR, 0.45), bR = away(hR, hL, 0.45);
-  ctx.fillStyle = PC.shirt; ctx.strokeStyle = PC.line; ctx.lineWidth = lw;
-  ctx.beginPath(); ctx.moveTo(tL.x, tL.y);
-  ctx.quadraticCurveTo(neckB.x, neckB.y - Wd * 0.06, tR.x, tR.y);
-  ctx.quadraticCurveTo(tR.x + (bR.x - tR.x) * 0.5 + Wd * 0.04, (tR.y + bR.y) / 2, bR.x, bR.y);
-  ctx.quadraticCurveTo((bL.x + bR.x) / 2, (bL.y + bR.y) / 2 + Wd * 0.05, bL.x, bL.y);
-  ctx.quadraticCurveTo(tL.x + (bL.x - tL.x) * 0.5 - Wd * 0.04, (tL.y + bL.y) / 2, tL.x, tL.y);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.strokeStyle = PC.shirtShade; ctx.lineWidth = lw * 1.4;     // 목 둘레선
-  ctx.beginPath(); ctx.arc(neckB.x, neckB.y - Wd * 0.02, Wd * 0.14, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+  limb([neckB, lerp(neckB, head, 0.5)], [Wd * 0.3, Wd * 0.28]); paint(PC.skin);
+
+  // 몸통: 비스듬한 어깨선 → 겨드랑이 → 살짝 들어간 허리 → 둥근 밑단 (티셔츠 모양)
+  const ux = up.x / ul, uy = up.y / ul;                                      // 위쪽 방향
+  const outL = { x: (sL.x - sR.x) / Wd, y: (sL.y - sR.y) / Wd }, outR = { x: -outL.x, y: -outL.y };
+  const shoulder = (s, o) => ({ x: s.x + o.x * Wd * 0.06 - ux * Wd * 0.07, y: s.y + o.y * Wd * 0.06 - uy * Wd * 0.07 });   // 비스듬히 내려간 어깨
+  const neckSide = (o) => ({ x: neckB.x + o.x * Wd * 0.2 + ux * Wd * 0.06, y: neckB.y + o.y * Wd * 0.2 + uy * Wd * 0.06 });
+  const armpit = (s, h, o) => { const p = lerp(s, h, 0.3); return { x: p.x + o.x * Wd * 0.02, y: p.y + o.y * Wd * 0.02 }; };
+  const hem = (h, other) => { const p = away(h, other, 0.3); return { x: p.x, y: p.y + Wd * 0.04 }; };
+  const nL = neckSide(outL), nR = neckSide(outR), shL = shoulder(sL, outL), shR = shoulder(sR, outR);
+  const apL = armpit(sL, hL, outL), apR = armpit(sR, hR, outR), hmL = hem(hL, hR), hmR = hem(hR, hL);
+  const hemMid = { x: (hmL.x + hmR.x) / 2 - ux * Wd * 0.06, y: (hmL.y + hmR.y) / 2 - uy * Wd * 0.06 };
+  const torso = () => {
+    ctx.beginPath(); ctx.moveTo(nL.x, nL.y);
+    ctx.quadraticCurveTo((nL.x + shL.x) / 2 + ux * Wd * 0.03, (nL.y + shL.y) / 2 + uy * Wd * 0.03, shL.x, shL.y);
+    ctx.quadraticCurveTo(shL.x + outL.x * Wd * 0.05, shL.y + outL.y * Wd * 0.05 - uy * Wd * 0.1, apL.x, apL.y);
+    ctx.quadraticCurveTo(apL.x - outL.x * Wd * 0.05, (apL.y + hmL.y) / 2, hmL.x, hmL.y);
+    ctx.quadraticCurveTo(hemMid.x, hemMid.y, hmR.x, hmR.y);
+    ctx.quadraticCurveTo(apR.x - outR.x * Wd * 0.05, (apR.y + hmR.y) / 2, apR.x, apR.y);
+    ctx.quadraticCurveTo(shR.x + outR.x * Wd * 0.05, shR.y + outR.y * Wd * 0.05 - uy * Wd * 0.1, shR.x, shR.y);
+    ctx.quadraticCurveTo((nR.x + shR.x) / 2 + ux * Wd * 0.03, (nR.y + shR.y) / 2 + uy * Wd * 0.03, nR.x, nR.y);
+    ctx.quadraticCurveTo(neckB.x - ux * Wd * 0.12, neckB.y - uy * Wd * 0.12, nL.x, nL.y);              // 둥근 목둘레
+    ctx.closePath();
+  };
+  // 소매: 몸통 어깨선(어깨~어깨 바로 아래 옆선)에 붙어서 위팔 절반까지 내려오는 티셔츠 소매
+  const sleeves = [];
+  for (const [si, ei, sh, out, apFull] of [[11, 13, shL, outL, apL], [12, 14, shR, outR, apR]]) {
+    if (!ok(ei)) continue;
+    const s = S(si), e = S(ei), root = { x: s.x - out.x * Wd * 0.02, y: s.y - out.y * Wd * 0.02 }, end = lerp(root, e, 0.46);
+    const ap = lerp(sh, apFull, Math.min(1, Wd * 0.38 / (Math.hypot(apFull.x - sh.x, apFull.y - sh.y) || 1)));
+    const dx = e.x - root.x, dy = e.y - root.y, dl = Math.hypot(dx, dy) || 1, px = -dy / dl * Wd * 0.18, py = dx / dl * Wd * 0.18;
+    let E1 = { x: end.x + px, y: end.y + py }, E2 = { x: end.x - px, y: end.y - py };
+    if (Math.hypot(E1.x - sh.x, E1.y - sh.y) > Math.hypot(E2.x - sh.x, E2.y - sh.y)) [E1, E2] = [E2, E1];   // 어깨 쪽 끝과 짝
+    const cuff = { x: end.x + dx / dl * Wd * 0.05, y: end.y + dy / dl * Wd * 0.05 };
+    sleeves.push({ si, path: (close) => { ctx.beginPath(); ctx.moveTo(sh.x, sh.y); ctx.lineTo(E1.x, E1.y); ctx.quadraticCurveTo(cuff.x, cuff.y, E2.x, E2.y); ctx.lineTo(ap.x, ap.y); if (close) ctx.closePath(); } });
+  }
+  // 몸통+소매를 한 장의 티셔츠처럼: 테두리를 먼저 굵게 그리고 색을 나중에 덮어 안쪽 이음선을 없앰
+  ctx.strokeStyle = PC.line; ctx.lineWidth = lw * 2.2; ctx.lineJoin = 'round';
+  torso(); ctx.stroke(); for (const sv of sleeves) { sv.path(true); ctx.stroke(); }
+  torso(); paint(PC.shirt, false);
+  torso(); { const g = ctx.createLinearGradient(apL.x, apL.y, apR.x, apR.y); g.addColorStop(0, 'rgba(40,70,110,.12)'); g.addColorStop(0.45, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,.08)'); ctx.fillStyle = g; ctx.fill(); }
+  for (const sv of sleeves) { sv.path(true); paint(PC.shirt, false); }
+  ctx.strokeStyle = PC.shirtShade; ctx.lineWidth = lw * 1.3;                 // 목둘레 안쪽 선
+  ctx.beginPath(); ctx.moveTo(nL.x, nL.y); ctx.quadraticCurveTo(neckB.x - ux * Wd * 0.04, neckB.y - uy * Wd * 0.04, nR.x, nR.y); ctx.stroke();
+
   // 머리 (그림). 두 귀가 잘 보이고 충분히 떨어져 있을 때만 기울기를 바꾸고, 부드럽게
   const im = opt.imgs && (opt.imgs['head_' + (opt.face || 'happy')] || opt.imgs.head_happy);
   const eL = S(7), eR = S(8);
@@ -150,22 +221,40 @@ export function drawPuppet(ctx, P, map, opt = {}) {
     const hh = hw * im.height / im.width;
     ctx.save(); ctx.translate(hc.x, hc.y); ctx.rotate(PST.roll); ctx.drawImage(im, -hw / 2, -hh * 0.55, hw, hh); ctx.restore();
   } else {
-    ctx.fillStyle = PC.skin; ctx.strokeStyle = PC.line; ctx.lineWidth = lw;
-    ctx.beginPath(); ctx.arc(hc.x, hc.y, hw * 0.42, 0, 7); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(hc.x, hc.y, hw * 0.42, 0, 7); paint(PC.skin);
     ctx.fillStyle = PC.hair; ctx.beginPath(); ctx.arc(hc.x, hc.y - hw * 0.05, hw * 0.44, Math.PI * 1.05, Math.PI * 1.95); ctx.fill();
   }
-  // 팔: 소매 · 살 · 손 — 머리보다 나중에 그려 얼굴 앞의 손이 보이게
-  for (const [si, ei, wi] of [[11, 13, 15], [12, 14, 16]]) {
-    const s = S(si), e = S(ei), w = S(wi);
-    if (!ok(ei)) { seg([s, lerp(s, away(s, neckB, 0.1), 1)], Wd * 0.4, PC.shirt); continue; }
-    seg(ok(wi) ? [s, e, w] : [s, e], Wd * 0.3, PC.skin);
-    seg([s, lerp(s, e, 0.5)], Wd * 0.4, PC.shirt);
+
+  // 팔: 살(어깨→팔꿈치→손목, 점점 가늘게) → 반팔 소매 → 손. 머리보다 나중에 그려 얼굴 앞의 손이 보이게
+  for (const [si, ei, wi, sh, out] of [[11, 13, 15, shL, outL], [12, 14, 16, shR, outR]]) {
+    const s = S(si), root = { x: s.x - out.x * Wd * 0.02, y: s.y - out.y * Wd * 0.02 };
+    if (!ok(ei)) { limb([sh, lerp(sh, { x: sh.x + out.x * Wd, y: sh.y + out.y * Wd + Wd * 0.5 }, 0.25)], [Wd * 0.42, Wd * 0.38]); paint(PC.shirt); continue; }
+    const e = S(ei), w = S(wi), armTop = lerp(root, e, 0.32);       // 살색은 소매 안쪽에서 시작 (어깨 위로 삐져나오지 않게)
+    limb(ok(wi) ? [armTop, e, w] : [armTop, e], ok(wi) ? [Wd * 0.29, Wd * 0.25, Wd * 0.21] : [Wd * 0.29, Wd * 0.25]); paint(PC.skin);
+    // 소매를 팔 위에 다시 덮음 (몸통에 붙는 쪽은 선 없이)
+    const sv = sleeves.find(v => v.si === si);
+    if (sv) { sv.path(true); paint(PC.shirt, false); sv.path(false); ctx.strokeStyle = PC.line; ctx.lineWidth = lw; ctx.lineJoin = 'round'; ctx.stroke(); }
     if (opt.hands !== false && ok(wi)) {
-      const hand = away(w, e, 0.18);
-      ctx.fillStyle = PC.skin; ctx.strokeStyle = PC.line; ctx.lineWidth = lw;
-      ctx.beginPath(); ctx.arc(hand.x, hand.y, Wd * 0.19, 0, 7); ctx.fill(); ctx.stroke();
+      const d = Math.atan2(w.y - e.y, w.x - e.x), hand = away(w, e, 0.16);
+      ctx.beginPath(); ctx.ellipse(hand.x, hand.y, Wd * 0.17, Wd * 0.14, d, 0, Math.PI * 2); paint(PC.skin);       // 주먹 쥔 손
+      const th = { x: hand.x + Math.cos(d - 1.3) * Wd * 0.12, y: hand.y + Math.sin(d - 1.3) * Wd * 0.12 };
+      ctx.beginPath(); ctx.ellipse(th.x, th.y, Wd * 0.07, Wd * 0.05, d, 0, Math.PI * 2); paint(PC.skin);           // 엄지
     }
   }
+}
+// 색연필 종이 질감 (한 번만 만들어 둠)
+let TEXP = null;
+function paperTexture(ctx) {
+  if (TEXP !== null) return TEXP;
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+    for (let i = 0; i < 1600; i++) {
+      g.fillStyle = Math.random() < 0.55 ? 'rgba(255,255,255,.10)' : 'rgba(120,80,50,.06)';
+      g.fillRect(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 1.6, 1 + Math.random() * 1.6);
+    }
+    TEXP = ctx.createPattern(c, 'repeat');
+  } catch { TEXP = false; }
+  return TEXP;
 }
 
 // ───────────────────────── 엔진 ─────────────────────────
@@ -176,6 +265,7 @@ export function start(cfg) {
   const SENS = clamp(parseFloat(params.get('sens')) || 1, 0.5, 2);
   const usePose = cfg.pose !== false, useEnergy = !!cfg.energy;
   const view = cfg.view || 'camera';      // camera: 카메라 화면 위에 놀이 / scene: 그림 배경 + 작은 카메라
+  let duo = !!cfg.duo && params.get('duo') === '1';   // 두 명 같이 (cfg.duo 인 놀이만)
 
   document.title = `${cfg.title} · 돌봄놀이터 온(ON)`;
   document.body.className = 'cat-' + (cfg.cat || 'run');
@@ -190,6 +280,7 @@ export function start(cfg) {
   <h1>${cfg.emoji} ${cfg.title}</h1>
   <p>${cfg.desc}</p>
   ${cfg.how ? `<ol class="how">${cfg.how.map(s => `<li>${s}</li>`).join('')}</ol>` : ''}
+  ${cfg.duo ? '<div class="lv duo" id="duo-pick"></div>' : ''}
   <div class="lv" id="lv-start"></div>
   <button class="btn" id="go-cam">📷 카메라로 시작</button>
   <button class="btn sub" id="go-key">⌨️ 카메라 없이 연습</button>
@@ -249,6 +340,11 @@ export function start(cfg) {
   const body = { lm: null, raw: null, visible: false, lastSeen: -9, t: 0, prev: null, prevT: 0, vel: new Array(33).fill(null).map(() => ({ x: 0, y: 0 })) };
   const base = { ok: false, T: 0.2, W: 0.13, cx: ASPECT / 2, cy: 0.5, shY: 0.4, hipY: 0.6, noseY: 0.3, ankL: 0.85, ankR: 0.85, kneeL: 0.73, kneeR: 0.73 };
   const calib = { win: [] };
+  // 두 번째 친구 (duo): 화면 오른쪽에 선 사람
+  const body2 = { lm: null, visible: false, t: 0, lastSeen: -9 };
+  const base2 = { ok: false, T: 0.2, W: 0.13, cx: ASPECT / 2, cy: 0.5, shY: 0.4, hipY: 0.6, noseY: 0.3, ankL: 0.85, ankR: 0.85, kneeL: 0.73, kneeR: 0.73 };
+  const calib2 = { win: [] };
+  const pstate = [{ size: null, roll: 0 }, { size: null, roll: 0 }];
   const jump = { air: false, airSince: 0, standSince: 0, upHold: 0 };
   const duck = { on: false, hold: 0, offHold: 0 };
 
@@ -261,6 +357,7 @@ export function start(cfg) {
 
   // ── 카메라 없이 연습: 가상 몸 ──
   const synth = { cx: ASPECT / 2, squat: 0, squatTarget: 0, jumpT: -9, hand: null, kick: { side: null, t: -9 }, knees: false, preset: null, keys: {}, pumpL: 0, pumpR: 0, prevLm: null };
+  const synth2 = { cx: ASPECT / 2 + 0.3, preset: null };       // 연습 모드 두 번째 친구 (자세만)
   function synthBody(now) {
     const s = synth;
     s.squat += (s.squatTarget - s.squat) * 0.25;
@@ -289,6 +386,7 @@ export function start(cfg) {
     const vis = raw && CORE.every(i => raw[i] && (raw[i].v ?? 1) >= 0.6);
     if (!vis) {
       body.visible = false; calib.win = [];
+      if (mode === 'calib' && duo && now - body.lastSeen > 1) base.ok = false;   // 기준을 잰 뒤 오래 사라지면 다시 잼
       if (now - body.lastSeen > 0.2) body.prev = null;   // 오래 끊기면 손 궤적 버림
       return;
     }
@@ -309,6 +407,7 @@ export function start(cfg) {
     const m = metrics(next);
 
     if (mode === 'calib') {
+      if (base.ok) return;                       // (두 명일 때) 친구 기준을 기다리는 중
       // 이 놀이에 꼭 필요한 점(무릎·발목 등)이 잘 보일 때만 기준을 잼
       if ((cfg.need || []).some(i => (next[i].v ?? 1) < 0.6)) { calib.win = []; calib.needMiss = true; return; }
       calib.needMiss = false;
@@ -320,7 +419,7 @@ export function start(cfg) {
       if (span > 1.8 && range < 0.1 * m.T) {
         const md = (k) => median(calib.win.map(s => s[k]));
         Object.assign(base, { ok: true, T: md('T'), W: md('W'), cx: md('cx'), cy: md('cy'), shY: md('shY'), hipY: md('hipY'), noseY: md('noseY'), ankL: md('ankL'), ankR: md('ankR'), kneeL: md('kneeL'), kneeR: md('kneeR') });
-        startCountdown(now);
+        if (!duo || (base2.ok && body2.visible)) startCountdown(now);
       }
       return;
     }
@@ -348,6 +447,54 @@ export function start(cfg) {
       base.cy += (m.cy - base.cy) * k; base.shY += (m.shY - base.shY) * k; base.hipY += (m.hipY - base.hipY) * k;
       base.T += (m.T - base.T) * k * 0.5; base.W += (m.W - base.W) * k * 0.5; base.cx += (m.cx - base.cx) * k;
     }
+  }
+  // 두 번째 친구: 부드럽게 다듬기 + 기준 재기만 (점프·숙이기 판정은 하지 않음)
+  function processPose2(raw, now) {
+    const vis = raw && CORE.every(i => raw[i] && (raw[i].v ?? 1) >= 0.6);
+    if (!vis) { body2.visible = false; calib2.win = []; if (mode === 'calib' && now - body2.lastSeen > 1) base2.ok = false; return; }
+    const dt = Math.max(0.001, now - body2.t);
+    const sm = body2.lm || raw.map(p => ({ ...p }));
+    body2.lm = raw.map((p, i) => {
+      const tau = (i >= 13 && i <= 22) || i >= 25 ? 0.04 : 0.08;
+      const q = sm[i] || p, pv = p.v ?? 1, qv = q.v ?? 1;
+      const a = pv < 0.5 ? 0 : qv < 0.5 ? 1 : 1 - Math.exp(-dt / tau);
+      return { x: q.x + (p.x - q.x) * a, y: q.y + (p.y - q.y) * a, v: pv };
+    });
+    body2.t = now; body2.visible = true; body2.lastSeen = now;
+    const m = metrics(body2.lm);
+    if (mode === 'calib') {
+      if (base2.ok) return;
+      if (calib2.win.length && now - calib2.win[calib2.win.length - 1].t > 0.2) calib2.win = [];
+      calib2.win.push({ t: now, ...m });
+      while (calib2.win.length && now - calib2.win[0].t > 2) calib2.win.shift();
+      const span = calib2.win.length ? now - calib2.win[0].t : 0, ys = calib2.win.map(s => s.cy);
+      if (span > 1.8 && Math.max(...ys) - Math.min(...ys) < 0.1 * m.T) {
+        const md = (k) => median(calib2.win.map(s => s[k]));
+        Object.assign(base2, { ok: true, T: md('T'), W: md('W'), cx: md('cx'), cy: md('cy'), shY: md('shY'), hipY: md('hipY'), noseY: md('noseY'), ankL: md('ankL'), ankR: md('ankR'), kneeL: md('kneeL'), kneeR: md('kneeR') });
+        if (base.ok && body.visible) startCountdown(now);
+      }
+      return;
+    }
+    if (base2.ok && Math.abs((base2.cy - m.cy) / base2.T) < 0.1) {   // 서 있을 때 기준을 천천히 따라감
+      const k = 1 - Math.exp(-dt / 3);
+      base2.cy += (m.cy - base2.cy) * k; base2.shY += (m.shY - base2.shY) * k; base2.hipY += (m.hipY - base2.hipY) * k; base2.cx += (m.cx - base2.cx) * k;
+    }
+  }
+  // 두 명이 잡혔을 때 왼쪽 사람 = 1번, 오른쪽 사람 = 2번. 한 명만 잡히면 가까운 쪽에 붙임
+  function splitPeople(list) {
+    const hipX = (P) => (P[23].x + P[24].x) / 2;
+    const ps = list.filter(Boolean).sort((a, b) => hipX(a) - hipX(b)).slice(0, 2);
+    if (!ps.length) return [null, null];
+    // 직전 위치(최근 0.5초 안에 보였을 때)와 가장 가깝게 짝지음 — 서로 자리를 바꿔도 사람이 뒤바뀌지 않게
+    const t = now();
+    const p1 = body.lm && t - body.lastSeen < 0.5 ? hipX(body.lm) : null, p2 = body2.lm && t - body2.lastSeen < 0.5 ? hipX(body2.lm) : null;
+    if (ps.length === 2) {
+      if (p1 === null || p2 === null) return [ps[0], ps[1]];          // 처음엔 왼쪽 사람이 1번
+      const keep = Math.abs(hipX(ps[0]) - p1) + Math.abs(hipX(ps[1]) - p2), swap = Math.abs(hipX(ps[1]) - p1) + Math.abs(hipX(ps[0]) - p2);
+      return keep <= swap ? [ps[0], ps[1]] : [ps[1], ps[0]];
+    }
+    const x = hipX(ps[0]), x1 = p1 ?? base.cx, x2 = p2 ?? base2.cx;
+    return Math.abs(x - x1) <= Math.abs(x - x2) ? [ps[0], null] : [null, ps[0]];
   }
   function metrics(P) {
     const sh = mid(P[11], P[12]), hip = mid(P[23], P[24]);
@@ -413,7 +560,10 @@ export function start(cfg) {
     get prevLm() { return body.prev; }, get prevT() { return body.prevT; }, get poseT() { return body.t; },
     base, get jumping() { return jump.air; }, get ducking() { return duck.on; }, energy,
     toScreen, fromScreen, get unit() { return VR.h; }, get rect() { return VR; }, get aspect() { return input === 'camera' ? VA : ASPECT; },
-    img: (n) => IMG[n] || null, beep, synth,
+    img: (n) => IMG[n] || null, beep, synth, synth2,
+    get duo() { return duo; },
+    // 사람별 정보 (0 = 왼쪽/혼자, 1 = 오른쪽 친구)
+    get people() { return [{ lm: body.visible ? body.lm : null, base, visible: body.visible }, { lm: body2.visible ? body2.lm : null, base: base2, visible: body2.visible }]; },
     react(name, dur = 0.6) { faceName = name; faceUntil = now() + dur; },   // 캐릭터 표정: happy | wow | focus
     hud(k, v) { hudVals[k] = v; },
     pop(text, x, y, color = '#F26B4F', size = 0.05) { fx.push({ type: 'text', text, x, y, color, size, t: now() }); },
@@ -465,15 +615,21 @@ export function start(cfg) {
   }
   function beginRound() {
     const t = now();
-    jump.air = false; duck.on = false;
+    // 판마다 동작 감지·연습 캐릭터 상태를 모두 처음으로
+    Object.assign(jump, { air: false, airSince: 0, standSince: 0, upHold: 0 }); Object.assign(duck, { on: false, hold: 0, offHold: 0 });
+    Object.assign(synth, { squat: 0, squatTarget: 0, jumpT: -9, hand: null, kick: { side: null, t: -9 }, knees: false, preset: null, keys: {}, pumpL: 0, pumpR: 0, act: 0, prevLm: null });
+    synth2.preset = null;
+    base2.ok = false; calib2.win = []; body2.visible = false; body2.lm = null;
     if (input === 'synth') { setSynthBase(); startCountdown(t); return; }
     if (useEnergy && !usePose) { mode = 'ecalib'; ecal.phase = 'still'; ecal.until = t + 2.5; ['still', 'stillL', 'stillR', 'move', 'moveL', 'moveR'].forEach(k => ecal[k] = []); return; }
     if (usePose) { mode = 'calib'; calib.win = []; base.ok = false; return; }
     startCountdown(t);
   }
   function setSynthBase() {
-    const m = metrics(buildBody({ cx: ASPECT / 2 }));
+    synth.cx = duo ? ASPECT / 2 - 0.3 : ASPECT / 2; synth2.cx = ASPECT / 2 + 0.3;
+    const m = metrics(buildBody({ cx: synth.cx }));
     Object.assign(base, { ok: true, T: m.T, W: m.W, cx: m.cx, cy: m.cy, shY: m.shY, hipY: m.hipY, noseY: m.noseY, ankL: m.ankL, ankR: m.ankR, kneeL: m.kneeL, kneeR: m.kneeR });
+    if (duo) { const m2 = metrics(buildBody({ cx: synth2.cx })); Object.assign(base2, { ok: true, T: m2.T, W: m2.W, cx: m2.cx, cy: m2.cy, shY: m2.shY, hipY: m2.hipY, noseY: m2.noseY, ankL: m2.ankL, ankR: m2.ankR, kneeL: m2.kneeL, kneeR: m2.kneeR }); }
     Object.assign(energy, { N: 0.01, D: 0.08, NL: 0.01, DL: 0.08, NR: 0.01, DR: 0.08, ok: true });
   }
 
@@ -492,7 +648,10 @@ export function start(cfg) {
     cfg.drawBack && cfg.drawBack(api, ctx, t);
     // 몸을 찾았을 때만 캐릭터를 그림 (장갑 등 놀이 그림과 같은 기준)
     if (cfg.puppet !== false && body.lm && body.visible && mode !== 'start') {
-      drawPuppet(ctx, body.lm, toScreen, { face: t < faceUntil ? faceName : (jump.air ? 'happy' : 'focus'), hands: cfg.hands !== false, imgs: IMG, refW: base.ok ? base.W * VR.h : 0 });
+      drawPuppet(ctx, body.lm, toScreen, { face: t < faceUntil ? faceName : (jump.air ? 'happy' : 'focus'), hands: cfg.hands !== false, imgs: IMG, refW: base.ok ? base.W * VR.h : 0, state: pstate[0] });
+    }
+    if (duo && cfg.puppet !== false && body2.lm && body2.visible && mode !== 'start') {
+      drawPuppet(ctx, body2.lm, toScreen, { face: t < faceUntil ? faceName : 'focus', hands: cfg.hands !== false, imgs: IMG, refW: base2.ok ? base2.W * VR.h : 0, state: pstate[1], colors: SHIRT2 });
     }
   }
   let faceName = 'happy', faceUntil = 0;
@@ -509,7 +668,7 @@ export function start(cfg) {
     const fc = $('camfx').getContext('2d');
     if (input !== 'camera' || !video.videoWidth) return;
     fc.save(); fc.translate(320, 0); fc.scale(-1, 1); fc.drawImage(video, 0, 0, 320, 240); fc.restore();
-    if (usePose) { fc.strokeStyle = body.visible ? '#2EC27E' : '#FF6B6B'; fc.lineWidth = 10; fc.strokeRect(0, 0, 320, 240); }   // 몸을 찾으면 초록 테두리
+    if (usePose) { fc.strokeStyle = body.visible && (!duo || body2.visible) ? '#2EC27E' : '#FF6B6B'; fc.lineWidth = 10; fc.strokeRect(0, 0, 320, 240); }   // 몸을 찾으면 초록 테두리
   }
   function drawFx(t) {
     for (let i = fx.length - 1; i >= 0; i--) {
@@ -525,7 +684,8 @@ export function start(cfg) {
       api.text(n > 0 ? n : '시작!', W / 2, H * 0.4, H * 0.22, '#1F2430', 900);
       if (cfg.tip) api.text(cfg.tip, W / 2, H * 0.55, H * 0.04, '#1F2430', 800);
     } else if (mode === 'calib') {
-      api.text(body.visible ? '그대로 가만히 서 있어요…' : '카메라 앞에 서 주세요', W / 2, H * 0.3, H * 0.055);
+      const ready = body.visible && (!duo || body2.visible);
+      api.text(ready ? '그대로 가만히 서 있어요…' : duo ? '두 사람이 나란히 서 주세요' : '카메라 앞에 서 주세요', W / 2, H * 0.3, H * 0.055);
     } else if (mode === 'ecalib') {
       const left = Math.ceil(ecal.until - t);
       if (ecal.phase === 'still') api.text(`모두 가만히! ${left}`, W / 2, H * 0.32, H * 0.07, '#3A7BEB', 900);
@@ -549,6 +709,7 @@ export function start(cfg) {
     const sim = window.__game.sim;
     if (sim.pose || sim.energy) {
       if (sim.pose) processPose(sim.pose, t);
+      if (sim.pose2) processPose2(sim.pose2, t);
       if (sim.energy) setEnergy(sim.energy.E ?? 0, sim.energy.L ?? 0, sim.energy.R ?? 0, t);
     } else if (input === 'camera') {
       if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
@@ -557,19 +718,21 @@ export function start(cfg) {
         if (landmarker) {
           try {
             const res = landmarker.detectForVideo(video, performance.now());
-            const raw = res.landmarks && res.landmarks[0] ? res.landmarks[0].map(p => ({ x: (1 - p.x) * VA, y: p.y, v: p.visibility ?? 1 })) : null;
-            processPose(raw, t);
+            const list = (res.landmarks || []).map(L => L.map(p => ({ x: (1 - p.x) * VA, y: p.y, v: p.visibility ?? 1 })));
+            if (duo) { const [a, b] = splitPeople(list); processPose(a, t); processPose2(b, t); }
+            else processPose(list[0] || null, t);
           } catch (e) { console.warn(e); }
         }
       }
       // 카메라 영상이 멈추면(0.25초 이상 새 화면 없음) 몸·움직임 입력을 쓰지 않음
       if (mode !== 'start' && t - lastFrameAt > 0.25) {
-        body.visible = false; body.prev = null;
+        body.visible = false; body.prev = null; body2.visible = false; calib.win = []; calib2.win = [];
         energy.A = energy.AL = energy.AR = 0; energy.E = energy.L = energy.R = 0;
       }
     } else if (mode !== 'start' && mode !== 'end') {
       const P = synthBody(t);
       processPose(P, t);
+      if (duo) processPose2(buildBody(Object.assign({ cx: synth2.cx }, synth2.preset || {})), t);
       // 연습 모드 움직임 양: 몸 움직임 + 키(A/L)
       let mv = 0; if (synth.prevLm) for (const i of [0, 15, 16, 25, 26, 27, 28, 11, 12]) mv += Math.hypot(P[i].x - synth.prevLm[i].x, P[i].y - synth.prevLm[i].y);
       synth.prevLm = P;
@@ -586,8 +749,9 @@ export function start(cfg) {
     }
     // 상태 안내
     if (input === 'camera' && usePose && mode !== 'start' && mode !== 'end') {
-      if (mode === 'calib') setStatus(calib.needMiss ? (cfg.needMsg || '발끝까지 화면에 보이게 조금 뒤로 가 주세요') : (cfg.place || '카메라에서 약 2.5~3m 떨어져, 머리부터 발까지 보이게 서요'));
-      else setStatus(body.visible ? '' : '몸이 잘 안 보여요. 카메라에서 조금 떨어져 주세요');
+      if (mode === 'calib') setStatus(calib.needMiss ? (cfg.needMsg || '발끝까지 화면에 보이게 조금 뒤로 가 주세요')
+        : duo ? '두 사람이 카메라에서 3m쯤 떨어져, 팔을 벌려도 닿지 않게 나란히 서요' : (cfg.place || '카메라에서 약 2.5~3m 떨어져, 머리부터 발까지 보이게 서요'));
+      else setStatus(body.visible && (!duo || body2.visible) ? '' : duo ? '두 사람 모두 화면에 보이게 서 주세요' : '몸이 잘 안 보여요. 카메라에서 조금 떨어져 주세요');
     }
     // 진행
     if (mode === 'countdown') {
@@ -619,6 +783,17 @@ export function start(cfg) {
     });
   }
   renderLv('lv-start'); renderLv('lv-end');
+  // 혼자 / 둘이 고르기 (cfg.duo 인 놀이만)
+  function renderDuo() {
+    const box = $('duo-pick'); if (!box) return;
+    box.style.gridTemplateColumns = '1fr 1fr';
+    box.innerHTML = [[false, '🙋 혼자', '한 명'], [true, '👫 둘이', '두 명 같이']].map(([v, a, b]) => `<button data-v="${v}" aria-pressed="${v === duo}">${a}<small>${b}</small></button>`).join('');
+    box.querySelectorAll('button').forEach(b => b.onclick = () => {
+      duo = b.dataset.v === 'true'; renderDuo();
+      const u = new URL(location.href); if (duo) u.searchParams.set('duo', '1'); else u.searchParams.delete('duo'); history.replaceState(null, '', u);
+    });
+  }
+  renderDuo();
   const initAudio = () => { if (!ac) { try { ac = new AudioContext(); } catch {} } else if (ac.state === 'suspended') ac.resume(); };
 
   async function startCamera() {
@@ -633,11 +808,13 @@ export function start(cfg) {
         btn.textContent = '몸 인식 준비 중… (처음엔 조금 걸려요)';
         const { PoseLandmarker, FilesetResolver } = await import(`${MP_URL}/vision_bundle.mjs`);
         const vision = await FilesetResolver.forVisionTasks(`${MP_URL}/wasm`);
-        const opts = (delegate) => ({ baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numPoses: 1,
+        const opts = (delegate) => ({ baseOptions: { modelAssetPath: MODEL, delegate }, runningMode: 'VIDEO', numPoses: duo ? 2 : 1,
           minPoseDetectionConfidence: 0.5, minPosePresenceConfidence: 0.5, minTrackingConfidence: 0.5 });
         try { landmarker = await PoseLandmarker.createFromOptions(vision, opts('GPU')); }
         catch { landmarker = await PoseLandmarker.createFromOptions(vision, opts('CPU')); }
+        landmarker.__poses = duo ? 2 : 1;
       }
+      if (landmarker && landmarker.__poses !== (duo ? 2 : 1)) { await landmarker.setOptions({ numPoses: duo ? 2 : 1 }); landmarker.__poses = duo ? 2 : 1; }
       await imagesReady;
       input = 'camera'; $('start').hidden = true; $('keys').hidden = true;
       $('cam').style.display = 'block';
@@ -684,7 +861,8 @@ export function start(cfg) {
   cv.addEventListener('mousemove', (e) => { if (input === 'synth') synth.hand = fromScreen(e.clientX, e.clientY); });
   cv.addEventListener('mouseleave', () => { synth.hand = null; });
 
-  window.__game = { api, sim: { pose: null, energy: null }, get mode() { return mode; }, base, energy,
+  window.__game = { api, sim: { pose: null, pose2: null, energy: null }, get mode() { return mode; }, base, base2, energy,
+    setDuo(v) { duo = !!v && !!cfg.duo; renderDuo(); },
     skip() { if (mode === 'countdown') countEnd = now(); },
     end() { if (mode === 'play') playEnd = now(); },
     now,
