@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>과녁 차기 · 돌봄놀이터 온(ON)</title>
+<title>과녁 맞추기 · 돌봄놀이터 온(ON)</title>
 <link rel="stylesheet" href="../../common/engine.css">
 </head>
 <body>
@@ -14,23 +14,24 @@ const S = { balls: [], points: 0, kicks: 0, miss: 0, bulls: 0, next: 0, sideN: 0
 const NAME = { L: '왼발', R: '오른발' };
 
 start({
-  id: 'target-kick', cat: 'tool', view: 'camera', emoji: '🎯', title: '과녁 차기',
-  desc: '굴러오는 공이 발 앞에 오면 그 발을 힘껏 들어 차서 과녁을 맞혀요.',
-  how: ['화면에 표시된 발(왼발·오른발)을 확인해요.', '공이 발 앞 동그라미에 닿을 때 그 발을 힘껏 차올려요.', '때를 잘 맞출수록 과녁 가운데에 맞아요.'],
-  tip: '공이 오면 발을 힘껏 차올려요!',
+  id: 'target-kick', cat: 'tool', view: 'camera', emoji: '🎯', title: '과녁 맞추기',
+  desc: '굴러오는 공은 발로 차올리고, 높이 날아오는 공은 점프해서 머리로 받아 과녁을 맞혀요.',
+  how: ['화면에 표시된 발(왼발·오른발)을 확인해요.', '공이 발 앞 동그라미에 닿을 때 그 발을 힘껏 차올려요.', '상: 공이 머리 위 동그라미로 날아오면 그 아래로 가서 점프! 머리로 받아요.'],
+  tip: '발로 차고, 높은 공은 점프 헤딩!',
   place: '카메라에서 약 2.5~3m 떨어져, 발끝까지 꼭 보이게 서요.',
   images: ['ball', 'target', 'star'], bg: 'bg_kick',
   need: [27, 28], needMsg: '발끝까지 화면에 보이게 조금 뒤로 가 주세요',
-  keys: '<b>Z</b> 왼발 차기 · <b>X</b> 오른발 차기',
+  keys: '<b>Z</b> 왼발 차기 · <b>X</b> 오른발 차기 · <b>← →</b> 옆으로 · <b>스페이스</b> 점프(헤딩)',
   hud: [['points', '점수'], ['kicks', '맞힌 공']],
   levels: {
-    easy: { name: '하', sub: '처음 해요', travel: 2.3, win: 0.35, gap: [1.2, 1.6], sides: 'R' },
-    mid:  { name: '중', sub: '익숙해요', travel: 1.9, win: 0.3, gap: [1.0, 1.3], sides: 'alt' },
-    hard: { name: '상', sub: '도전해요', travel: 1.35, win: 0.27, gap: [0.7, 1.0], sides: 'random' },   // 과녁은 그대로, 공만 빠르게
+    easy: { name: '하', sub: '처음 해요', travel: 2.3, win: 0.35, gap: [1.2, 1.6], sides: 'R', head: 0 },
+    mid:  { name: '중', sub: '익숙해요', travel: 1.9, win: 0.3, gap: [1.0, 1.3], sides: 'alt', head: 0 },
+    // hard: faster balls, and about 1 in 3 balls is a high ball to head (jump under it)
+    hard: { name: '상', sub: '도전해요 · 헤딩', travel: 1.35, win: 0.27, gap: [0.7, 1.0], sides: 'random', head: 0.35, headTravel: 1.7, headWin: 0.35 },
   },
   init(api, t) {
     window.__S = S;
-    Object.assign(S, { balls: [], points: 0, kicks: 0, miss: 0, bulls: 0, next: t + 1, sideN: 0 });
+    Object.assign(S, { balls: [], points: 0, kicks: 0, miss: 0, bulls: 0, heads: 0, next: t + 1, sideN: 0 });
     for (const k of ['L', 'R']) Object.assign(S.foot[k], { up: false, low: 0, last: -9, kickT: -9, hold: 0 });
   },
   update(api, t, dt) {
@@ -44,12 +45,25 @@ start({
       if (f.up) { if (lift < 0.08) { f.low += dt; if (f.low >= 0.15) { f.up = false; f.low = 0; } } else f.low = 0; }
     }
     // 새 공
-    if (t >= S.next && !S.balls.some(x => !x.done) && api.timeLeft > L.travel + 0.4) {
-      const side = L.sides === 'R' ? 'R' : L.sides === 'alt' ? (S.sideN++ % 2 ? 'L' : 'R') : pick(['L', 'R']);
-      const ax = side === 'L' ? b.cx - b.W * 0.55 : b.cx + b.W * 0.55;
-      S.balls.push({ side, tx: ax, ty: (side === 'L' ? b.ankL : b.ankR) + 0.01, sx: api.aspect / 2, sy: 0.35, t0: t, arrive: t + L.travel, done: false });
+    if (t >= S.next && !S.balls.some(x => !x.done) && api.timeLeft > Math.max(L.travel, L.headTravel || 0) + 0.4) {
+      if (L.head && Math.random() < L.head) {
+        // header ball: flies in from the top to a spot just above the head (left / centre / right of the start position)
+        const off = pick([-1, 0, 1]), tx = clamp(b.cx + off * b.W * 1.0, 0.2, api.aspect - 0.2);
+        S.balls.push({ type: 'head', side: tx < b.cx - 0.01 ? 'L' : tx > b.cx + 0.01 ? 'R' : pick(['L', 'R']), tx, ty: Math.max(0.1, b.noseY - b.T * 0.5),
+          sx: api.aspect / 2, sy: -0.05, t0: t, arrive: t + L.headTravel, done: false });
+      } else {
+        const side = L.sides === 'R' ? 'R' : L.sides === 'alt' ? (S.sideN++ % 2 ? 'L' : 'R') : pick(['L', 'R']);
+        const ax = side === 'L' ? b.cx - b.W * 0.55 : b.cx + b.W * 0.55;
+        S.balls.push({ side, tx: ax, ty: (side === 'L' ? b.ankL : b.ankR) + 0.01, sx: api.aspect / 2, sy: 0.35, t0: t, arrive: t + L.travel, done: false });
+      }
     }
-    for (const ball of S.balls) if (!ball.done && t > ball.arrive + L.win) {
+    // header: head under the ball (sideways within ~0.8 shoulder width) and jumping / head clearly raised, inside the time window
+    const hb = S.balls.find(x => !x.done && x.type === 'head');
+    if (hb && lm && Math.abs(t - hb.arrive) <= L.headWin) {
+      const nose = lm[0], under = Math.abs(nose.x - hb.tx) < b.W * 0.8, up = api.jumping || (b.noseY - nose.y) > b.T * 0.12;
+      if (under && up) scoreBall(api, hb, Math.abs(t - hb.arrive) / L.headWin, t, '헤딩');
+    }
+    for (const ball of S.balls) if (!ball.done && t > ball.arrive + (ball.type === 'head' ? L.headWin : L.win)) {
       ball.done = true; ball.doneT = t; ball.missed = true; S.miss++;
       const s = api.toScreen({ x: ball.tx, y: ball.ty }); api.pop('아깝다!', s.x, s.y - 80, '#5B6170', 0.045);
       S.next = t + rand(L.gap[0], L.gap[1]);
@@ -70,7 +84,15 @@ start({
     }
     for (const ball of S.balls) {
       const foot = api.toScreen({ x: ball.tx, y: ball.ty });
-      if (!ball.done) {
+      if (!ball.done && ball.type === 'head') {
+        // high ball: dashed ring above the head where to meet it, ball arcs in from the top
+        const p = clamp((t - ball.t0) / (ball.arrive - ball.t0), 0, 1.2);
+        ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 5; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.arc(foot.x, foot.y, u * 0.07, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+        api.text('⬆ 점프 헤딩!', foot.x + u * 0.1, foot.y, H * 0.045, '#7B5CC4', 900, 'left');
+        const q = Math.min(1, p), x = ball.sx + (ball.tx - ball.sx) * q, y = ball.sy + (ball.ty - ball.sy) * q - Math.sin(q * Math.PI) * 0.08 + (p > 1 ? (p - 1) * 0.6 : 0);
+        const s = api.toScreen({ x, y }), size = (0.04 + 0.04 * q) * u;
+        api.drawImg('ball', s.x, s.y, size * 2, p * 10);
+      } else if (!ball.done) {
         const p = clamp((t - ball.t0) / (ball.arrive - ball.t0), 0, 1.2);
         ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 5; ctx.setLineDash([8, 8]); ctx.beginPath(); ctx.ellipse(foot.x, foot.y, u * 0.08, u * 0.035, 0, 0, 7); ctx.stroke(); ctx.setLineDash([]);
         api.text(NAME[ball.side] + '!', foot.x, foot.y + u * 0.07, H * 0.045, ball.side === 'L' ? '#F26B4F' : '#3A7BEB', 900);
@@ -90,25 +112,30 @@ start({
     }
   },
   result() {
-    return { stats: [[S.points, '점수'], [S.kicks, '맞힌 공'], [S.bulls, '정중앙']], msg: `공 ${S.kicks + S.miss}개 중 ${S.kicks}개를 과녁에 맞혔어요! 🎯` };
+    return { stats: [[S.points, '점수'], [S.kicks, '맞힌 공'], S.heads ? [S.heads, '헤딩'] : [S.bulls, '정중앙']], msg: `공 ${S.kicks + S.miss}개 중 ${S.kicks}개를 과녁에 맞혔어요! 🎯` };
   },
 });
 
 function onKick(api, side, t) {
   if (api.mode !== 'play') return;
-  const L = api.L, ball = S.balls.find(x => !x.done);
+  const L = api.L, ball = S.balls.find(x => !x.done && x.type !== 'head');
   if (!ball) return;
   const err = Math.abs(t - ball.arrive);
   if (err > L.win) return;
   if (ball.side !== side) { const s = api.toScreen({ x: ball.tx, y: ball.ty }); api.pop(`${NAME[ball.side]}로 차요!`, s.x, s.y - 80, '#7B5CC4', 0.04); return; }
-  const q = err / L.win, pts = q < 0.34 ? 3 : q < 0.67 ? 2 : 1;
+  scoreBall(api, ball, err / L.win, t);
+}
+// q = timing error 0 (perfect) .. 1 (edge of the window). Ball flies to the target on its side
+function scoreBall(api, ball, q, t, how = '') {
+  const pts = q < 0.34 ? 3 : q < 0.67 ? 2 : 1, side = ball.side;
   ball.done = true; ball.doneT = t; ball.kicked = true;
   const H = api.H, off = (pts === 3 ? 0 : pts === 2 ? 0.045 : 0.075) * H;
-  const tgtX = (S.targetPos || { L: api.W * 0.2, R: api.W * 0.8 })[side];   // 찬 발 쪽 과녁으로
+  const tgtX = (S.targetPos || { L: api.W * 0.2, R: api.W * 0.8 })[side];
   const a = Math.random() * Math.PI * 2; ball.hitX = tgtX + Math.cos(a) * off; ball.hitDy = Math.sin(a) * off;
-  S.points += pts; S.kicks++; if (pts === 3) S.bulls++;
-  api.pop(pts === 3 ? '정중앙! +3' : pts === 2 ? '좋아요! +2' : '맞혔다! +1', tgtX, H * 0.36, '#F26B4F', 0.06); api.react('happy');
-  api.beep(330, 0.08, 'square', 0.1); api.beep(pts === 3 ? 1175 : 880, 0.15, 'triangle', 0.1, 0.45);
+  S.points += pts; S.kicks++; if (pts === 3) S.bulls++; if (how) S.heads = (S.heads || 0) + 1;
+  const pre = how ? how + '! ' : '';
+  api.pop(pre + (pts === 3 ? '정중앙! +3' : pts === 2 ? '좋아요! +2' : '맞혔다! +1'), tgtX, H * 0.36, '#F26B4F', 0.06); api.react('happy');
+  api.beep(how ? 520 : 330, 0.08, 'square', 0.1); api.beep(pts === 3 ? 1175 : 880, 0.15, 'triangle', 0.1, 0.45);
   S.next = t + 0.5 + Math.random() * 0.5 + api.L.gap[0];
 }
 </script>
