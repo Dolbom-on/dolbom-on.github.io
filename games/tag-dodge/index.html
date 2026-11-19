@@ -8,16 +8,29 @@
 </head>
 <body>
 <script type="module">
-import { start, rand, pick, dist, mid, segDist, clamp, ASPECT } from '../../common/engine.js';
+import { start, rand, pick, dist, mid, segDist, clamp, ASPECT, CHAR_IDS } from '../../common/engine.js';
+import { drawCharSprite, SPRITE_POSES } from '../../common/scene.js';
 
-const S = { ghosts: [], dodged: 0, caught: 0, combo: 0, best: 0, inv: -9, next: 0 };
+const S = { ghosts: [], dodged: 0, caught: 0, combo: 0, best: 0, inv: -9, next: 0, px: null, vx: 0, face: 1 };
+
+// The child is shown as a whole-body illustration (front view) standing where the child stands
+function drawKid(api, ctx, t) {
+  const b = api.base, lm = api.lm; if (!b || !b.ok) return;
+  const hip = lm ? mid(lm[23], lm[24]) : { x: b.cx, y: b.hipY };
+  const ground = (b.ankL + b.ankR) / 2 + 0.01, lift = Math.max(0, b.hipY - hip.y);
+  const feet = api.toScreen({ x: hip.x, y: ground - lift }), shadow = api.toScreen({ x: hip.x, y: ground });
+  const height = (ground - b.noseY + b.T * 0.5) * api.unit;
+  const pose = t - S.inv < 0.8 ? 'foops' : Math.abs(S.vx) > 0.25 ? 'fstep' : 'fstand';
+  drawCharSprite(api, ctx, pose, feet.x, feet.y, height, pose === 'fstep' && S.face < 0, shadow.y);
+}
 
 start({
   id: 'tag-dodge', cat: 'run', view: 'camera', emoji: '👻', title: '술래 피하기',
   desc: '위에서 유령 술래가 내 쪽으로 내려와요. 옆으로 재빨리 움직여 피해요!',
   how: ['화면 가운데에 서요.', '유령이 내 머리 위로 오면 옆으로 크게 한 걸음 움직여요.', '유령이 지나가면 다시 가운데로 와요.'],
   tip: '유령이 오면 옆으로 쓱!',
-  images: ['ghost1', 'ghost2', 'star'], bg: 'bg_tag',
+  images: ['ghost1', 'ghost2', 'star', ...CHAR_IDS.flatMap(c => SPRITE_POSES.slice(0, 3).map(p => `${c}_${p}`))], bg: 'bg_tag',
+  puppet: false, chars: true,
   keys: '<b>← →</b> 옆으로 움직이기',
   hud: [['dodged', '피한 유령'], ['combo', '연속']],
   levels: {
@@ -25,10 +38,13 @@ start({
     mid:  { name: '중', sub: '익숙해요', fall: 2.2, lock: 0.8, every: [1.4, 1.9], max: 2 },
     hard: { name: '상', sub: '도전해요', fall: 1.7, lock: 0.6, every: [0.9, 1.3], max: 3 },
   },
-  init(api, t) { window.__S = S; Object.assign(S, { ghosts: [], dodged: 0, caught: 0, combo: 0, best: 0, inv: -9, next: t + 1 }); },
+  init(api, t) { window.__S = S; Object.assign(S, { ghosts: [], dodged: 0, caught: 0, combo: 0, best: 0, inv: -9, next: t + 1, px: null, vx: 0, face: 1 }); },
   update(api, t, dt) {
     const L = api.L, b = api.base, lm = api.lm;
     const bodyX = lm ? mid(lm[11], lm[12]).x : b.cx;
+    // sideways speed (smoothed) -> side-step pose and its direction
+    if (S.px !== null && dt > 0) { const v = (bodyX - S.px) / dt / Math.max(0.05, b.W); S.vx += (v - S.vx) * Math.min(1, dt / 0.12); if (Math.abs(S.vx) > 0.25) S.face = Math.sign(S.vx); }
+    S.px = bodyX;
     // 새 유령: 지금 몸 위쪽에서 출발
     if (t >= S.next && S.ghosts.length < L.max && api.timeLeft > L.fall) {
       const x = clamp(bodyX + rand(-0.08, 0.08), 0.15, api.aspect - 0.15);
@@ -62,6 +78,7 @@ start({
     S.ghosts = S.ghosts.filter(g => !g.done || t - (g.caught || g.passed) < 0.6);
     api.hud('dodged', S.dodged); api.hud('combo', S.combo);
   },
+  drawBack(api, ctx, t) { if (api.mode === 'play' || api.mode === 'countdown') drawKid(api, ctx, t); },
   draw(api, ctx, t) {
     const u = api.unit;
     for (const g of S.ghosts) {
