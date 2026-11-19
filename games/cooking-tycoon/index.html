@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>요리 타이쿤 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start, pick } from '../../common/engine.js';
+import { makeSlots, handHover, drawDwell } from '../../common/reach.js';
+
+const NAME = { i_bread: '식빵', i_jam: '딸기잼', i_pepper: '파프리카', i_mushroom: '버섯', i_yogurt: '요거트', i_strawberry: '딸기', i_banana: '바나나', i_milk: '우유',
+  i_bun: '햄버거빵', i_lettuce: '양상추', i_patty: '패티', i_egg: '달걀', i_cheese: '치즈', i_gim: '김', i_rice: '밥', i_danmuji: '단무지', i_spinach: '시금치',
+  i_pork: '돼지고기', i_onion: '양파', i_gochujang: '고추장', tomato: '토마토' };
+const RECIPES = {
+  easy: [
+    { name: '잼 토스트', dish: 'd_jamtoast', items: ['i_bread', 'i_jam'] },
+    { name: '파프리카 버섯볶음', dish: 'd_pepperstir', items: ['i_pepper', 'i_mushroom'] },
+    { name: '딸기 요거트', dish: 'd_yogurt', items: ['i_yogurt', 'i_strawberry'] },
+    { name: '바나나 우유', dish: 'd_bananamilk', items: ['i_banana', 'i_milk'] },
+  ],
+  mid: [
+    { name: '햄버거', dish: 'd_burger', items: ['i_bun', 'i_patty', 'i_lettuce'] },
+    { name: '딸기 바나나 우유', dish: 'd_smoothie', items: ['i_banana', 'i_milk', 'i_strawberry'] },
+    { name: '달걀 샌드위치', dish: 'd_sandwich', items: ['i_bread', 'i_egg', 'i_lettuce'] },
+    { name: '토마토 치즈 토스트', dish: 'd_cheesetoast', items: ['i_bread', 'tomato', 'i_cheese'] },
+  ],
+  hard: [
+    { name: '김밥', dish: 'd_gimbap', items: ['i_gim', 'i_rice', 'i_danmuji', 'i_spinach'] },
+    { name: '제육볶음', dish: 'd_jeyuk', items: ['i_pork', 'i_onion', 'i_gochujang', 'i_rice'] },
+    { name: '비빔밥', dish: 'd_bibimbap', items: ['i_rice', 'i_spinach', 'i_egg', 'i_gochujang'] },
+    { name: '치즈버거', dish: 'd_cheeseburger', items: ['i_bun', 'i_patty', 'i_cheese', 'tomato'] },
+  ],
+};
+const ALL = Object.keys(NAME);
+const SIZE = 0.12, DWELL = 0.35;
+const S = { order: null, items: [], got: [], dishes: 0, wrong: 0, served: -9, nextAt: 0, ready: false, flying: [], last: null };
+
+function newOrder(api, t) {
+  const list = RECIPES[api.level];
+  let r; do { r = pick(list); } while (r === S.last && list.length > 1);
+  S.last = r; S.order = r; S.got = []; S.ready = false;
+  const decoys = ALL.filter(n => !r.items.includes(n)).sort(() => Math.random() - 0.5).slice(0, r.items.length);
+  const names = [...r.items, ...decoys].sort(() => Math.random() - 0.5);
+  const slots = makeSlots(api, 3, -0.08, S.cx0 ?? api.base.cx).sort(() => Math.random() - 0.5);   // 위 주문서와 겹치지 않게 어깨 높이부터, 처음 선 자리 기준
+  S.items = names.map((n, i) => ({ ...slots[i], name: n, w: SIZE, h: SIZE, hover: 0, used: false, shake: -9 }));
+}
+
+start({
+  id: 'cooking-tycoon', cat: 'tool', view: 'camera', emoji: '🍳', title: '요리 타이쿤',
+  desc: '주문서를 보고 몸 둘레의 재료를 손으로 모아 요리를 완성해요. 다 모으면 점프해서 내보내요!',
+  how: ['위의 주문서에서 만들 요리와 재료를 확인해요.', '재료 위에 손을 대고 잠깐 기다리면 접시에 담겨요. 다른 재료는 담기지 않아요.', '재료를 다 모으면 두 발로 점프! 요리가 완성돼요.'],
+  tip: '재료를 모으고 점프로 완성!',
+  images: [...ALL, 'plate', 'bell', 'chef_hat', 'star', ...Object.values(RECIPES).flat().map(r => r.dish)], bg: 'bg_kitchen',
+  keys: '<b>마우스</b>를 재료 위에 잠깐 올리기 · <b>← →</b> 옆으로 · <b>↓</b> 쪼그려 앉기 · <b>스페이스</b> 점프(완성)',
+  hud: [['dishes', '완성한 요리']],
+  levels: {
+    easy: { name: '하', sub: '재료 2가지' },
+    mid:  { name: '중', sub: '재료 3가지' },
+    hard: { name: '상', sub: '재료 4가지' },
+  },
+  duration: 90,
+  init(api, t) { window.__S = S; window.__R = RECIPES; Object.assign(S, { dishes: 0, wrong: 0, served: -9, nextAt: 0, flying: [], last: null, cx0: api.base.cx }); newOrder(api, t); },
+  onJump(api, t) {
+    if (api.mode !== 'play' || !S.ready) return;
+    S.ready = false; S.dishes++; S.served = t; S.nextAt = t + 1.4;
+    api.pop(`${S.order.name} 완성! 🎉`, api.W / 2, api.H * 0.3, '#F26B4F', 0.07);
+    api.burst(api.W / 2, api.H * 0.8, '#FFD24D', 20); [659, 784, 988, 1319].forEach((f, i) => api.beep(f, 0.12, 'triangle', 0.1, i * 0.08)); api.react('happy', 1);
+  },
+  update(api, t, dt) {
+    if (S.nextAt && t >= S.nextAt) { S.nextAt = 0; newOrder(api, t); }
+    S.flying = S.flying.filter(f => t - f.t < 0.6);
+    api.hud('dishes', S.dishes);
+    if (!S.order || S.ready || S.nextAt) { S.items.forEach(it => { it.hover = 0; }); return; }
+    const picked = handHover(api, S.items.filter(it => !it.used), dt, DWELL, SIZE);
+    if (picked) {
+      if (S.order.items.includes(picked.name) && !S.got.includes(picked.name)) {
+        picked.used = true; S.got.push(picked.name); S.flying.push({ name: picked.name, x: picked.x, y: picked.y, t });
+        api.beep(880, 0.08, 'triangle', 0.1);
+        if (S.got.length === S.order.items.length) { S.ready = true; api.beep(1175, 0.15, 'triangle', 0.1, 0.1); }
+      } else { picked.shake = t; S.wrong++; const s = api.toScreen(picked); api.pop('이건 안 들어가요!', s.x, s.y - 40, '#7B5CC4', 0.035); api.beep(220, 0.12, 'sine', 0.07); }
+    }
+  },
+  draw(api, ctx, t) {
+    if (api.mode !== 'play' || !S.order) return;
+    const W = api.W, H = api.H, u = api.unit;
+    // 주문서 (위 가운데)
+    const th = H * 0.15, tw = Math.min(W * 0.66, th * (1.6 + S.order.items.length * 0.85)), tx = W / 2 - tw / 2, ty = Math.max(72, H * 0.1);   // 위 점수판(HUD) 아래에
+    ctx.fillStyle = 'rgba(255,253,246,.96)'; ctx.strokeStyle = '#E8D9C2'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.roundRect(tx, ty, tw, th, 18); ctx.fill(); ctx.stroke();
+    api.drawImg(S.order.dish, tx + th * 0.6, ty + th / 2, th * 0.95);
+    api.text(S.order.name, tx + th * 1.2, ty + th * 0.3, H * 0.04, '#1F2430', 900, 'left');
+    S.order.items.forEach((n, i) => {
+      const x = tx + th * 1.25 + i * th * 0.85 + th * 0.3, y = ty + th * 0.68, got = S.got.includes(n);
+      api.drawImg(n, x, y, th * 0.42, 0, got ? 1 : 0.85);
+      if (got) { ctx.fillStyle = '#1FA67A'; ctx.beginPath(); ctx.arc(x + th * 0.18, y + th * 0.14, th * 0.1, 0, 7); ctx.fill(); api.text('✓', x + th * 0.18, y + th * 0.14, th * 0.14, '#fff', 900); }
+    });
+    // 재료 (몸 둘레)
+    if (!S.nextAt) for (const it of S.items) {
+      if (it.used) continue;
+      const s = api.toScreen(it), sh = t - it.shake < 0.4 ? Math.sin((t - it.shake) * 50) * 8 : 0;
+      ctx.fillStyle = 'rgba(255,255,255,.75)'; ctx.beginPath(); ctx.arc(s.x + sh, s.y, SIZE * u * 0.62, 0, 7); ctx.fill();
+      api.drawImg(it.name, s.x + sh, s.y, SIZE * u * 0.95);
+      api.text(NAME[it.name], s.x + sh, s.y + SIZE * u * 0.72, H * 0.026, '#5B6170', 800);
+      drawDwell(api, ctx, it, DWELL, SIZE);
+    }
+    // 접시 (아래 가운데)와 담긴 재료
+    const px = W / 2, py = H * 0.9, pw = H * 0.26;
+    api.drawImg('plate', px, py, pw);
+    if (t - S.served < 1.4) api.drawImg(S.order.dish, px, py - pw * 0.15 - (t - S.served) * 20, pw * 1.1 * Math.min(1, (t - S.served) * 4));
+    else S.got.forEach((n, i) => api.drawImg(n, px + (i - (S.got.length - 1) / 2) * pw * 0.22, py - pw * 0.08, pw * 0.3));
+    for (const f of S.flying) { const k = Math.min(1, (t - f.t) / 0.6), s = api.toScreen(f); api.drawImg(f.name, s.x + (px - s.x) * k, s.y + (py - s.y) * k - Math.sin(k * Math.PI) * H * 0.1, SIZE * u * (1 - k * 0.5)); }
+    if (S.ready) api.text('재료 완성! 점프해서 내보내요! ⬆️', W / 2, H * 0.74, H * 0.05, '#F26B4F', 900);
+  },
+  result() {
+    return { stats: [[S.dishes, '완성한 요리']], msg: S.dishes ? `요리를 ${S.dishes}개 만들었어요! 👩‍🍳` : '재료를 모으고 점프하면 요리가 완성돼요.' };
+  },
+});
+</script>
+</body>
+</html>
