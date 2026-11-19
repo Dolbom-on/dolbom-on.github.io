@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>같은 그림 찾기 · 돌봄놀이터 온(ON)</title>
+<link rel="stylesheet" href="../../common/engine.css">
+</head>
+<body>
+<script type="module">
+import { start } from '../../common/engine.js';
+import { makeSlots, handHover, drawDwell } from '../../common/reach.js';
+
+const FACES = ['carrot', 'tomato', 'ball', 'star', 'rocket', 'ghost1', 'broccoli', 'corn'];
+const CW = 0.11, CH = 0.15, DWELL = 0.55;   // 손을 0.55초 대고 있어야 뒤집힘 (지나가다 실수로 뒤집히지 않게)
+const S = { cards: [], open: [], pairs: 0, tries: 0, boards: 0, checkAt: 0, newBoardAt: 0 };
+
+function deal(api) {
+  const L = api.L, rows = L.pairs === 4 ? 2 : L.pairs === 6 ? 3 : 4;
+  const slots = makeSlots(api, rows, 0.16, S.cx0 ?? api.base.cx);   // 처음 선 자리 기준 (옆으로 움직인 뒤에도 카드가 쏠리지 않게)
+  const faces = FACES.slice(0, L.pairs).flatMap(f => [f, f]).sort(() => Math.random() - 0.5);
+  S.cards = slots.slice(0, faces.length).map((s, i) => ({ ...s, w: CW, h: CH, face: faces[i], up: false, matched: false, flipT: -9, hover: 0 }));
+  S.open = [];
+}
+
+start({
+  id: 'memory-match', cat: 'tool', view: 'camera', emoji: '🃏', title: '같은 그림 찾기',
+  desc: '몸 둘레에 놓인 카드를 손으로 뒤집어 같은 그림 두 장을 찾아요.',
+  how: ['카드 위에 손을 대고 잠깐 기다리면 카드가 뒤집혀요.', '두 장을 뒤집어 같은 그림이면 짝 성공!', '먼 카드는 옆으로 걸어가고, 낮은 카드는 쪼그려 앉아서 뒤집어요.'],
+  tip: '손을 카드에 대고 잠깐 기다려요!',
+  images: [...FACES, 'card_back', 'card_front'], bg: 'bg_tetris',
+  keys: '<b>마우스</b>를 카드 위에 잠깐 올리기 · <b>← →</b> 옆으로 · <b>↓</b> 쪼그려 앉기',
+  hud: [['pairs', '찾은 짝'], ['boards', '다 맞힌 판']],
+  levels: {
+    easy: { name: '하', sub: '4쌍', pairs: 4 },
+    mid:  { name: '중', sub: '6쌍', pairs: 6 },
+    hard: { name: '상', sub: '8쌍', pairs: 8 },
+  },
+  duration: 90,
+  init(api, t) { window.__S = S; Object.assign(S, { pairs: 0, tries: 0, boards: 0, checkAt: 0, newBoardAt: 0, cx0: api.base.cx }); deal(api); },
+  update(api, t, dt) {
+    if (S.newBoardAt && t >= S.newBoardAt) { S.newBoardAt = 0; deal(api); }
+    // 두 장을 봤으면 잠깐 보여 주고 판정
+    if (S.open.length === 2 && t >= S.checkAt) {
+      const [a, b] = S.open; S.tries++;
+      if (a.face === b.face) {
+        a.matched = b.matched = true; S.pairs++;
+        const s = api.toScreen({ x: (a.x + b.x) / 2, y: Math.min(a.y, b.y) });
+        api.pop('짝 찾았다!', s.x, s.y - 30, '#1FA67A', 0.05); api.burst(api.toScreen(a).x, api.toScreen(a).y, '#FFD24D', 10); api.burst(api.toScreen(b).x, api.toScreen(b).y, '#FFD24D', 10);
+        api.beep(784, 0.12, 'triangle', 0.1); api.beep(1046, 0.15, 'triangle', 0.1, 0.1); api.react('happy');
+        if (S.cards.every(c => c.matched)) { S.boards++; S.newBoardAt = t + 1.5; api.pop('다 찾았어요! 🎉 새 카드!', api.W / 2, api.H * 0.3, '#3A7BEB', 0.07); }
+      } else { a.up = b.up = false; a.flipT = b.flipT = t; api.beep(300, 0.12, 'sine', 0.07); api.react('wow', 0.5); }
+      S.open = [];
+    }
+    const cards = S.cards.filter(c => !c.matched && !c.up);
+    cards.forEach(c => { c.locked = S.open.length >= 2; });
+    const picked = handHover(api, cards, dt, DWELL, CW);
+    if (picked && S.open.length < 2) {
+      picked.up = true; picked.flipT = t; S.open.push(picked); api.beep(620, 0.06, 'triangle', 0.08);
+      if (S.open.length === 2) S.checkAt = t + 0.7;
+    }
+    api.hud('pairs', S.pairs); api.hud('boards', S.boards);
+  },
+  draw(api, ctx, t) {
+    if (api.mode !== 'play') return;
+    const u = api.unit;
+    for (const c of S.cards) {
+      const s = api.toScreen(c), w = CW * u, h = CH * u;
+      const k = Math.min(1, (t - c.flipT) / 0.25), sx = Math.abs(Math.cos(k * Math.PI));      // 뒤집히는 모습
+      const showFace = (c.up || c.matched) ? k > 0.5 : k < 0.5;
+      ctx.save(); ctx.translate(s.x, s.y); ctx.scale(Math.max(0.05, sx), 1);
+      if (c.matched) ctx.globalAlpha = 0.55;
+      const back = api.img(showFace ? 'card_front' : 'card_back');
+      if (back) ctx.drawImage(back, -w / 2, -h / 2, w, h); else { ctx.fillStyle = showFace ? '#FFF8EC' : '#BFE8D8'; ctx.beginPath(); ctx.roundRect(-w / 2, -h / 2, w, h, 10); ctx.fill(); }
+      if (showFace) api.drawImg(c.face, 0, 0, w * 0.72);
+      ctx.restore();
+      if (!c.up && !c.matched) drawDwell(api, ctx, c, DWELL, CH);
+    }
+  },
+  result() {
+    return { stats: [[S.pairs, '찾은 짝'], [S.boards, '다 맞힌 판'], [S.tries, '뒤집어 본 횟수']], msg: S.pairs ? `짝을 ${S.pairs}개 찾았어요! 🃏` : '' };
+  },
+});
+</script>
+</body>
+</html>
