@@ -146,7 +146,7 @@
   <header>
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span>건강한 돌봄놀이터</div>
     <h1>돌봄놀이터 <span class="on">온(ON)</span></h1>
-    <p class="lead">카메라 앞에서 몸을 움직여 노는 놀이 12가지예요. 놀이를 고르고 난이도를 정한 뒤 시작해요.</p>
+    <p class="lead">카메라 앞에서 몸을 움직여 노는 놀이 13가지예요. 놀이를 고르고 난이도를 정한 뒤 시작해요.</p>
     <div class="ready" aria-label="놀이 전 준비">
       <div><span class="ic" aria-hidden="true">💻</span><span><b>준비물</b>카메라가 있는 컴퓨터, TV나 프로젝터</span></div>
       <div><span class="ic" aria-hidden="true">📏</span><span><b>자리</b>카메라에서 약 3m, 머리부터 발까지 보이게</span></div>
@@ -212,10 +212,11 @@
 </dialog>
 
 <script>
-const CATS = {
-  run:  { name: '달리기·술래형', cls: 'run'  },
-  team: { name: '팀 대항·협동',  cls: 'team' },
-  tool: { name: '공·도구 조작',  cls: 'tool' },
+// 놀이 고르기: 세 카테고리 대신 몇 명이 하는지로 (혼자 / 둘이도 가능 / 반 전체)
+const KIND = {
+  solo:  { name: '혼자',    cls: 'run'  },
+  duo:   { name: '둘이',    cls: 'tool' },
+  class: { name: '반 전체', cls: 'team' },
 };
 const LV = [
   { key: 'easy', label: '하', sub: '처음 해요' },
@@ -225,68 +226,72 @@ const LV = [
 
 // ready: true 로 바꾸면 놀이 시작 버튼이 열림 (games/<id>/index.html?level=easy|mid|hard)
 const GAMES = [
-  { id: 'log-jump', ready: true, cat: 'run', emoji: '🪵', name: '통나무 점프', who: '1명', move: '점프', int: '높음',
+  { id: 'log-jump', ready: true, kind: 'solo', emoji: '🪵', name: '통나무 점프', who: '1명', move: '점프', int: '높음',
     desc: '굴러오는 통나무를 점프해서 넘어요.',
     steps: ['카메라 앞에서 머리부터 무릎까지 보이게 서요.', '통나무가 발 앞에 오면 두 발로 점프해요.', '넘을 때마다 점수가 올라가요.'],
     lv: ['통나무가 천천히 하나씩 와요.', '통나무가 더 자주 오고, 두 개가 연달아 오기도 해요.', '빠르게 오고, 통나무가 두세 개씩 연달아 와요.'],
     safe: '미끄럽지 않은 바닥에서, 무릎을 살짝 굽혀 착지해요.' },
-  { id: 'tunnel-run', ready: true, cat: 'run', emoji: '🏃', name: '터널 달리기', who: '1명', move: '점프·쪼그려 앉기', int: '높음',
-    desc: '바닥 바위는 점프로 넘고, 매달린 바위는 쪼그려 앉아 피해요.',
-    steps: ['바닥 바위가 오면 두 발로 점프해요.', '매달린 바위가 오면 무릎을 굽혀 쪼그려 앉아요.', '부딪히지 않고 많이 통과하면 좋아요.'],
-    lv: ['장애물이 천천히 오고, 같은 종류가 몇 번씩 이어져요.', '점프와 숙이기가 섞여서 와요.', '빠르게 바뀌고 두 개가 연달아 오기도 해요.'],
-    safe: '쪼그려 앉을 때 옆 친구와 부딪히지 않게 간격을 띄워요.' },
-  { id: 'animal-race', ready: true, cat: 'run', emoji: '🐆', name: '동물 달리기 경주', who: '1명', move: '무릎 높이 들기', int: '높음',
+  { id: 'stone-bridge', ready: true, kind: 'solo', emoji: '🪨', name: '징검다리 건너기', who: '1명', move: '옆걸음·점프', int: '높음',
+    desc: '다가오는 징검다리 돌이 있는 칸으로 옆걸음하고, 돌이 발밑에 오면 폴짝 뛰어 강을 건너요.',
+    steps: ['발밑의 1·2·3번 칸을 확인하고 옆으로 걸어 칸을 옮겨요.', '돌이 발밑에 닿을 때 두 발로 점프해요.', '돌이 없는 칸이나 X 돌을 밟으면 퐁당!'],
+    lv: ['세 칸 중 한 칸이 빠진 줄이 섞여서 와요.', '두 칸만 오고, O 돌만 밟아야 해요.', '돌이 한 칸만 오고 더 빨라요.'],
+    safe: '옆으로 옮길 공간을 비우고, 무릎을 살짝 굽혀 착지해요.' },
+  { id: 'animal-race', ready: true, kind: 'solo', emoji: '🐆', name: '동물 달리기 경주', who: '1명', move: '무릎 높이 들기', int: '높음',
     desc: '제자리에서 무릎을 높이 들고 뛰면 내 캐릭터가 달려요. 치타보다 먼저 결승선에!',
     steps: ['제자리에서 무릎을 번갈아 높이 들며 뛰어요.', '빨리 뛸수록 캐릭터가 빨라져요.', '물웅덩이가 나오면 점프해서 넘어요.'],
     lv: ['짧은 거리, 느린 치타와 겨뤄요.', '거리가 길어지고 물웅덩이가 나와요.', '빠른 치타와 긴 거리, 물웅덩이가 더 많아요.'],
     safe: '앞으로 나가지 말고 제자리에서 뛰어요.' },
-  { id: 'tag-dodge', ready: true, cat: 'run', emoji: '👻', name: '술래 피하기', who: '1명', move: '옆으로 이동', int: '중간 이상',
+  { id: 'tag-dodge', ready: true, kind: 'solo', emoji: '👻', name: '술래 피하기', who: '1명', move: '옆으로 이동', int: '중간 이상',
     desc: '위에서 유령 술래가 내 쪽으로 내려오면 옆으로 재빨리 움직여 피해요.',
     steps: ['화면 가운데에 서요.', '유령이 머리 위로 오면 옆으로 크게 한 걸음 움직여요.', '유령이 지나가면 다시 가운데로 와요.'],
     lv: ['유령이 하나씩 천천히 내려와요.', '유령 두 마리가 더 빨리 내려와요.', '유령 세 마리가 빠르게, 늦게까지 따라와요.'],
     safe: '옆으로 움직일 공간을 넉넉히 비워 두어요.' },
-
-  { id: 'rocket-launch', ready: true, cat: 'team', emoji: '🚀', name: '다 같이 로켓 발사', who: '반 전체', move: '점핑잭·제자리 뛰기', int: '높음',
-    desc: '반 친구 모두가 함께 움직인 만큼 로켓 연료가 차요.',
-    steps: ['모두 화면에 보이도록 서요.', '처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '다 같이 크게 움직여 연료를 채우면 로켓 발사!'],
-    lv: ['연료 목표가 낮고, 어떤 움직임이든 괜찮아요.', '화면에 나온 동작으로 바꿔 가며 움직여요.', '연료 목표가 높아요.'],
-    safe: '팔을 벌려도 닿지 않을 만큼 서로 떨어져 서요.' },
-  { id: 'tug-of-war', ready: true, cat: 'team', emoji: '🪢', name: '팀 줄다리기', who: '반 전체 (두 팀)', move: '제자리 뛰기', int: '높음',
-    desc: '화면 왼쪽 팀과 오른쪽 팀 중 더 열심히 움직인 쪽으로 줄이 당겨져요.',
-    steps: ['가운데 점선을 기준으로 두 팀이 같은 인원으로 나누어 서요.', '시작 신호가 나오면 자기 자리에서 힘껏 뛰어요.', '줄을 우리 쪽 끝까지 당기면 1점!'],
-    lv: ['짧게 겨뤄요.', '중간에 해야 할 동작이 바뀌어요.', '더 오래, 더 빨리 당겨져요.'],
-    safe: '가운데 선을 넘지 않고 자기 자리에서 뛰어요.' },
-  { id: 'freeze-dance', ready: true, cat: 'team', emoji: '🧊', name: '얼음땡 춤', who: '반 전체', move: '춤추기·멈추기', int: '중간 이상',
-    desc: '음악이 나오면 신나게 춤추고, 음악이 멈추면 그대로 얼음!',
-    steps: ['음악이 나오는 동안 크게 춤춰요.', '음악이 멈추면 그 자리에서 움직이지 않아요.', '다시 음악이 나오면 땡! 또 춤춰요.'],
-    lv: ['음악이 길게 나오고, 멈출 때 여유가 있어요.', '멈추는 때가 짧고 갑작스러워요.', '음악이 더 자주 멈추고, 바로 얼음해야 해요.'],
-    safe: '팔다리를 크게 움직일 때 주변 친구를 살펴요.' },
-  { id: 'human-tetris', ready: true, cat: 'team', emoji: '🧱', name: '인간 테트리스', who: '1명', move: '스쿼트·큰 자세·한 발 서기', int: '중간 이상',
-    desc: '벽이 가까워지면 벽에 뚫린 구멍 모양대로 몸을 맞춰 통과해요.',
-    steps: ['벽이 다가오는 동안 구멍 모양과 자세 이름을 살펴요.', '벽이 닿기 전에 같은 모양으로 몸을 만들어요.', '벽과 벽 사이에는 제자리에서 가볍게 뛰어요.'],
+  { id: 'human-tetris', ready: true, kind: 'duo', emoji: '🧱', name: '인간 테트리스', who: '1~2명', move: '스쿼트·큰 자세·한 발 서기', int: '중간 이상',
+    desc: '벽이 가까워지면 벽에 뚫린 구멍 모양대로 몸을 맞춰 통과해요. 둘이 하면 두 사람이 모두 맞춰야 통과!',
+    steps: ['놀이 화면에서 혼자 또는 둘이를 골라요.', '벽 구멍과 자세 이름을 보고, 벽이 닿기 전에 같은 모양을 만들어요.', '벽과 벽 사이에는 제자리에서 가볍게 뛰어요.'],
     lv: ['만세·T자·Y자·앉아서 T자가 천천히 와요.', '별·ㄴ자·번개 자세가 더해지고 빨라져요.', '한 발 서기까지 모든 자세가 빠르게 와요.'],
-    safe: '한 발로 서는 자세에서는 균형을 잃지 않게 천천히 해요.' },
-
-  { id: 'veggie-slice', ready: true, cat: 'tool', emoji: '🥕', name: '채소 자르기', who: '1명', move: '팔 뻗기·쪼그려 앉기', int: '중간 이상',
+    safe: '둘이 할 때는 팔을 벌려도 닿지 않게 나란히 서요.' },
+  { id: 'veggie-slice', ready: true, kind: 'solo', emoji: '🥕', name: '채소 자르기', who: '1명', move: '팔 뻗기·쪼그려 앉기', int: '중간 이상',
     desc: '날아오르는 채소는 손으로 자르고, 단 음료와 사탕은 피해요.',
     steps: ['손을 크게 휘둘러 화면 속 채소를 잘라요.', '높은 채소는 팔을 뻗고, 낮은 채소는 쪼그려 앉아 잘라요.', '단 음료와 사탕을 자르면 점수가 줄어요.'],
     lv: ['채소가 크고 천천히 올라와요.', '단 음료·사탕이 섞이고 낮은 채소도 나와요.', '여러 개가 높고 낮게 흩어져 빠르게 나와요.'],
     safe: '팔을 휘두를 때 옆 친구와 충분히 떨어져요.' },
-  { id: 'boxing-pads', ready: true, cat: 'tool', emoji: '🥊', name: '복싱 패드', who: '1명', move: '옆으로 펀치·숙이기', int: '중간 이상',
+  { id: 'boxing-pads', ready: true, kind: 'solo', emoji: '🥊', name: '복싱 패드', who: '1명', move: '옆으로 펀치·숙이기', int: '중간 이상',
     desc: '옆에 나타나는 패드를 주먹으로 쭉 뻗어 치고, 날아오는 베개는 숙여서 피해요.',
     steps: ['두 주먹을 얼굴 앞에 들고 서요.', '패드가 나타난 쪽으로 팔을 옆으로 쭉 뻗어 쳐요.', '베개가 날아오면 무릎을 굽혀 숙이거나 옆으로 피해요.'],
     lv: ['왼쪽·오른쪽 패드만 나와요.', '베개 피하기가 섞여서 나와요.', '번호 순서대로 패드를 치고, 베개도 피해요.'],
     safe: '팔을 끝까지 뻗되 팔꿈치를 너무 세게 펴지 않아요.' },
-  { id: 'goalkeeper', ready: true, cat: 'tool', emoji: '🧤', name: '골키퍼 막기', who: '1명', move: '런지·팔 뻗기·쪼그려 앉기', int: '중간 이상',
+  { id: 'goalkeeper', ready: true, kind: 'solo', emoji: '🧤', name: '골키퍼 막기', who: '1명', move: '런지·팔 뻗기·쪼그려 앉기', int: '중간 이상',
     desc: '날아오는 공을 손이나 발로 막아 골문을 지켜요.',
     steps: ['골문 가운데에 서서 무릎을 살짝 굽혀요.', '공이 오는 쪽으로 다리를 크게 내딛고 팔을 쭉 뻗어요.', '낮은 공은 손이나 발로 막아요.'],
     lv: ['공이 몸 가까이로 천천히 와요.', '공이 좌우 끝, 낮은 곳으로도 와요.', '공이 더 멀리, 빠르게 와요.'],
     safe: '다리를 크게 내디딜 때 바닥이 미끄럽지 않은지 확인해요.' },
-  { id: 'target-kick', ready: true, cat: 'tool', emoji: '🎯', name: '과녁 차기', who: '1명', move: '발차기·한 발 서기', int: '중간 이상',
-    desc: '굴러오는 공이 발 앞에 오면 그 발을 힘껏 차올려 과녁을 맞혀요.',
+  { id: 'target-kick', ready: true, kind: 'solo', emoji: '🎯', name: '과녁 차기', who: '1명', move: '발차기·한 발 서기', int: '중간 이상',
+    desc: '굴러오는 공이 발 앞에 오면 그 발을 힘껏 차올려요. 왼발로 차면 왼쪽 과녁, 오른발로 차면 오른쪽 과녁에 맞아요.',
     steps: ['화면에 나온 발(왼발·오른발)을 확인해요.', '공이 발 앞 동그라미에 닿을 때 그 발을 힘껏 차올려요.', '때를 잘 맞출수록 과녁 가운데에 맞아요.'],
-    lv: ['공이 오른발로만 천천히 와요.', '왼발·오른발로 번갈아 와요.', '어느 발로 올지 모르고, 과녁이 움직여요.'],
+    lv: ['공이 오른발로만 천천히 와요.', '왼발·오른발로 번갈아 와요.', '어느 발로 올지 모르고, 공이 더 빨리 와요.'],
     safe: '차는 발 앞쪽에 친구나 물건이 없는지 살펴요.' },
+  { id: 'memory-match', ready: true, kind: 'solo', emoji: '🃏', name: '같은 그림 찾기', who: '1명', move: '옆걸음·팔 뻗기·쪼그려 앉기', int: '중간 이상',
+    desc: '몸 둘레에 놓인 카드를 손으로 뒤집어 같은 그림 두 장을 찾아요.',
+    steps: ['카드 위에 손을 대고 잠깐 기다리면 카드가 뒤집혀요.', '두 장을 뒤집어 같은 그림이면 짝 성공!', '먼 카드는 옆으로 걸어가고, 낮은 카드는 쪼그려 앉아 뒤집어요.'],
+    lv: ['카드 4쌍(8장)', '카드 6쌍(12장)', '카드 8쌍(16장)'],
+    safe: '옆으로 움직일 공간을 비우고, 쪼그려 앉을 때 무릎이 발끝을 넘지 않게 해요.' },
+  { id: 'cooking-tycoon', ready: true, kind: 'solo', emoji: '🍳', name: '요리 타이쿤', who: '1명', move: '팔 뻗기·옆걸음·점프', int: '중간 이상',
+    desc: '주문서를 보고 몸 둘레의 재료를 손으로 모아 요리를 완성해요. 다 모으면 점프해서 내보내요!',
+    steps: ['주문서에서 만들 요리와 재료를 확인해요.', '재료 위에 손을 대고 잠깐 기다리면 접시에 담겨요.', '재료를 다 모으면 두 발로 점프해서 요리를 완성해요.'],
+    lv: ['재료 2가지 요리 (잼 토스트, 바나나 우유 등)', '재료 3가지 요리 (햄버거, 달걀 샌드위치 등)', '재료 4가지 요리 (김밥, 제육볶음, 비빔밥 등)'],
+    safe: '팔을 뻗거나 옆으로 움직일 때 주변 물건을 치워 두어요.' },
+
+  { id: 'rocket-launch', ready: true, kind: 'class', emoji: '🚀', name: '다 같이 로켓 발사', who: '반 전체', move: '점핑잭·제자리 뛰기', int: '높음',
+    desc: '반 친구 모두가 함께 움직인 만큼 로켓 연료가 차요.',
+    steps: ['모두 화면에 보이도록 서요.', '처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '다 같이 크게 움직여 연료를 채우면 로켓 발사!'],
+    lv: ['연료 목표가 낮고, 어떤 움직임이든 괜찮아요.', '화면에 나온 동작으로 바꿔 가며 움직여요.', '연료 목표가 높아요.'],
+    safe: '팔을 벌려도 닿지 않을 만큼 서로 떨어져 서요.' },
+  { id: 'freeze-dance', ready: true, kind: 'class', emoji: '🧊', name: '얼음땡 춤', who: '반 전체', move: '춤추기·멈추기', int: '중간 이상',
+    desc: '화면 속 춤 선생님을 따라 신나게 춤추고, 음악이 멈추면 그대로 얼음!',
+    steps: ['음악이 나오면 춤 선생님 동작을 따라 크게 춤춰요.', '음악이 멈추면 그 자리에서 움직이지 않아요.', '다시 음악이 나오면 땡! 새 동작을 따라 춰요.'],
+    lv: ['음악이 길게 나오고, 멈출 때 여유가 있어요.', '멈추는 때가 짧고 갑작스러워요.', '음악이 더 자주 멈추고, 바로 얼음해야 해요.'],
+    safe: '팔다리를 크게 움직일 때 주변 친구를 살펴요.' },
 ];
 
 const $ = (id) => document.getElementById(id);
@@ -294,9 +299,9 @@ let filter = 'all';
 let current = null;
 
 function renderTabs() {
-  const items = [['all', '전체', null], ...Object.entries(CATS).map(([k, c]) => [k, c.name, c.cls])];
+  const items = [['all', '전체', null], ...Object.entries(KIND).map(([k, c]) => [k, c.name, c.cls])];
   $('tabs').innerHTML = items.map(([k, name, cls]) => {
-    const n = k === 'all' ? GAMES.length : GAMES.filter(g => g.cat === k).length;
+    const n = k === 'all' ? GAMES.length : GAMES.filter(g => g.kind === k).length;
     const dot = cls ? `<span class="dot ${cls}" style="background:var(--c)"></span>` : '';
     return `<button class="tab" data-k="${k}" aria-pressed="${k === filter}">${dot}${name}<span class="n">${n}</span></button>`;
   }).join('');
@@ -310,12 +315,12 @@ function art(g) {
 }
 
 function renderGrid() {
-  const list = GAMES.filter(g => filter === 'all' || g.cat === filter);
+  const list = GAMES.filter(g => filter === 'all' || g.kind === filter);
   $('grid').innerHTML = list.map(g => {
     const no = String(GAMES.indexOf(g) + 1).padStart(2, '0');
-    return `<button class="card ${CATS[g.cat].cls}" data-id="${g.id}" aria-label="${g.name}, ${CATS[g.cat].name}, ${g.who}">
+    return `<button class="card ${KIND[g.kind].cls}" data-id="${g.id}" aria-label="${g.name}, ${g.who}">
       <div class="top"><span class="no">${no}</span><span class="who">${g.who}</span>${art(g)}</div>
-      <div class="body"><h3>${g.name}</h3><p>${g.desc}</p><div class="move">${CATS[g.cat].name} · ${g.move}</div></div>
+      <div class="body"><h3>${g.name}</h3><p>${g.desc}</p><div class="move">${g.move}</div></div>
     </button>`;
   }).join('');
   $('grid').querySelectorAll('.card').forEach(c => c.onclick = () => openGame(c.dataset.id));
@@ -337,10 +342,10 @@ function openGame(id, level) {
   if (!g) return;
   current = g;
   const dlg = $('dlg');
-  dlg.className = CATS[g.cat].cls;
+  dlg.className = KIND[g.kind].cls;
   $('d-hero').querySelectorAll('.emoji, img').forEach(n => n.remove());
   $('d-hero').insertAdjacentHTML('afterbegin', art(g));
-  $('d-cat').textContent = CATS[g.cat].name;
+  $('d-cat').textContent = g.kind === 'duo' ? '혼자 · 둘이' : KIND[g.kind].name;
   $('d-title').textContent = g.name;
   $('d-desc').textContent = g.desc;
   $('d-who').textContent = g.who;
