@@ -36,17 +36,18 @@ export function makeScene() {
 
 // 아이 그림 (발 위치 기준). pose: run | jump | oops | duck | cheer
 export function drawKid(api, ctx, x, feetY, height, pose, t, moving = true, groundY = feetY) {
-  const run1 = api.img('kid_run1');
+  const pre = api.char === 'girl' && api.img('g_run1') ? 'g_' : 'kid_';     // 여자 캐릭터를 고르면 g_ 그림
+  const run1 = api.img(pre + 'run1');
   if (!run1) { ctx.fillStyle = '#7CC4F2'; ctx.fillRect(x - height * 0.15, feetY - height, height * 0.3, height); return; }
-  let name = 'kid_run1';
-  if (pose === 'jump') name = 'kid_jump';
-  else if (pose === 'oops') name = 'kid_oops';
-  else if (pose === 'duck') name = 'kid_duck';
-  else if (pose === 'cheer') name = 'kid_cheer';
-  else if (moving && Math.floor(t / 0.16) % 2) name = 'kid_run2';
-  const im = api.img(name) || run1;
+  let name = 'run1';
+  if (pose === 'jump') name = 'jump';
+  else if (pose === 'oops') name = 'oops';
+  else if (pose === 'duck') name = 'duck';
+  else if (pose === 'cheer') name = 'cheer';
+  else if (moving && Math.floor(t / 0.16) % 2) name = 'run2';
+  const im = api.img(pre + name) || api.img('kid_' + name) || run1;
   let k = height / run1.height;
-  if (name === 'kid_duck') k *= 0.85;
+  if (name === 'duck') k *= 0.85;
   const bob = pose === 'run' && moving ? Math.abs(Math.sin(t * Math.PI / 0.16)) * height * 0.015 : 0;
   ctx.fillStyle = 'rgba(80,110,60,.18)';
   const lift = Math.max(0, groundY - feetY) / height;
