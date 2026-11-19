@@ -34,6 +34,19 @@ export function makeScene() {
   };
 }
 
+// Whole-body sprite of the picked mascot, feet at (x, feetY). pose: fstand|fstep|foops (front) or bstand|bjump|boops (back).
+// height = on-screen height of the standing sprite; other poses keep their size relative to it. flip mirrors left/right.
+export const SPRITE_POSES = ['fstand', 'fstep', 'foops', 'bstand', 'bjump', 'boops'];
+export function drawCharSprite(api, ctx, pose, x, feetY, height, flip = false, shadowY = feetY) {
+  const c = api.char || 'bear', ref = api.img(`${c}_${pose[0]}stand`), im = api.img(`${c}_${pose}`) || ref;
+  if (!im || !ref) return false;
+  const k = height / ref.height, w = im.width * k, h = im.height * k;
+  const lift = Math.max(0, shadowY - feetY) / height;
+  ctx.fillStyle = 'rgba(60,80,60,.18)'; ctx.beginPath(); ctx.ellipse(x, shadowY, height * 0.2 * (1 - lift * 0.5), height * 0.045 * (1 - lift * 0.5), 0, 0, 7); ctx.fill();
+  ctx.save(); ctx.translate(x, feetY); if (flip) ctx.scale(-1, 1); ctx.drawImage(im, -w / 2, -h, w, h); ctx.restore();
+  return true;
+}
+
 // 아이 그림 (발 위치 기준). pose: run | jump | oops | duck | cheer
 export function drawKid(api, ctx, x, feetY, height, pose, t, moving = true, groundY = feetY) {
   const pre = api.char && api.img(api.char + '_run1') ? api.char + '_' : 'kid_';     // picked mascot's side-view sprites (fallback: kid_)

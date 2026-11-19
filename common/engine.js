@@ -389,7 +389,7 @@ export function start(cfg) {
   const view = cfg.view || 'camera';      // camera: 카메라 화면 위에 놀이 / scene: 그림 배경 + 작은 카메라
   let duo = !!cfg.duo && params.get('duo') === '1';   // 두 명 같이 (cfg.duo 인 놀이만)
   // 캐릭터(남자·여자) 고르기: 아이 그림이 나오는 놀이만. 고른 것은 이 컴퓨터에 기억 (다른 놀이에서도 그대로)
-  const showChar = (view === 'camera' && cfg.puppet !== false) || view === 'scene';
+  const showChar = !!cfg.chars || (view === 'camera' && cfg.puppet !== false) || view === 'scene';
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
   const pickOk = (v, d) => CHAR_IDS.includes(v) ? v : d;
