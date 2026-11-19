@@ -24,12 +24,13 @@ const POSES = {
 };
 const KEYS = Object.keys(POSES);
 const BONES = [['L', 11, 13], ['L', 13, 15], ['R', 12, 14], ['R', 14, 16], ['L', 23, 25], ['L', 25, 27], ['R', 24, 26], ['R', 26, 28]];
-const S = { walls: [], pass: 0, fail: 0, next: 0, hist: [], lastKey: null, okNow: false, boneOk: [] };
+const S = { walls: [], pass: 0, fail: 0, next: 0, hist: [[], []], lastKey: null, okNow: [false, false], boneOk: [[], []], count: 0 };
 
-// 지금 자세가 목표와 맞는지
-function judge(api, lm, def) {
-  const b = api.base, tgt = buildBody(def);
-  const cos = [], boneOk = [];
+// 지금 자세가 목표와 맞는지 (b = 그 사람의 기준 몸 크기). boneOk 에 팔다리별 결과를 담음
+function judge(api, lm, def, b, boneOk) {
+  const tgt = buildBody(def);
+  const cos = [];
+  boneOk.length = 0;
   let hidden = false;
   BONES.forEach(([side, a, c], i) => {
     const leg = i >= 4;
@@ -41,7 +42,6 @@ function judge(api, lm, def) {
     const v = (px * tx + py * ty) / (pl * tl);
     cos.push({ v, key: !leg || def.ll || def.rl }); boneOk.push(v >= 0.8);
   });
-  S.boneOk = boneOk;
   if (hidden || cos.length < 3) return false;
   if (def.raise && ((lm[27].v ?? 1) < 0.5 || (lm[28].v ?? 1) < 0.5)) return false;
   const mean = cos.reduce((s, c) => s + c.v, 0) / cos.length;
@@ -52,8 +52,8 @@ function judge(api, lm, def) {
   return true;
 }
 
-// 구멍 뚫린 벽 그림 (화면 크기)
-function makeWall(api, def) {
+// 구멍 뚫린 벽 그림 (화면 크기). 사람마다 자기 자리에 구멍 하나씩
+function makeWall(api, defs) {
   const W = api.W, H = api.H, c = document.createElement('canvas'); c.width = W; c.height = H;
   const g = c.getContext('2d');
   g.fillStyle = '#D9CCF2'; g.fillRect(0, 0, W, H);
@@ -61,26 +61,32 @@ function makeWall(api, def) {
   const bh = H / 9;
   for (let r = 0; r < 10; r++) { g.beginPath(); g.moveTo(0, r * bh); g.lineTo(W, r * bh); g.stroke();
     for (let x = (r % 2) * bh; x < W; x += bh * 2) { g.beginPath(); g.moveTo(x, r * bh); g.lineTo(x, r * bh + bh); g.stroke(); } }
-  const b = api.base, P = buildBody(Object.assign({}, def, { cx: b.cx, hipY: b.hipY, scale: b.T / 0.2 }));
-  const s = (i) => api.toScreen(P[i]), u = api.unit * (b.T / 0.2);
   g.globalCompositeOperation = 'destination-out';
-  g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = u * 0.085;
-  [[11, 13, 15], [12, 14, 16], [23, 25, 27], [24, 26, 28]].forEach(([a, m, e]) => { g.beginPath(); g.moveTo(s(a).x, s(a).y); g.lineTo(s(m).x, s(m).y); g.lineTo(s(e).x, s(e).y); g.stroke(); });
-  g.beginPath(); [11, 12, 24, 23].forEach((i, k) => k ? g.lineTo(s(i).x, s(i).y) : g.moveTo(s(i).x, s(i).y)); g.closePath(); g.fill(); g.lineWidth = u * 0.11; g.stroke();
-  // 머리 구멍: 그림 캐릭터 머리와 같은 크기·위치
-  const Wpx = b.W * api.unit; g.beginPath(); g.arc(s(0).x, s(0).y - Wpx * 0.1, puppetHeadRadius(Wpx) * 1.05, 0, 7); g.fill();
+  let cx = 0, cy = 0;
+  defs.forEach((def, k) => {
+    const b = api.people[k].base, P = buildBody(Object.assign({}, def, { cx: b.cx, hipY: b.hipY, scale: b.T / 0.2 }));
+    const s = (i) => api.toScreen(P[i]), u = api.unit * (b.T / 0.2);
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = u * 0.085;
+    [[11, 13, 15], [12, 14, 16], [23, 25, 27], [24, 26, 28]].forEach(([a, m, e]) => { g.beginPath(); g.moveTo(s(a).x, s(a).y); g.lineTo(s(m).x, s(m).y); g.lineTo(s(e).x, s(e).y); g.stroke(); });
+    g.beginPath(); [11, 12, 24, 23].forEach((i, n) => n ? g.lineTo(s(i).x, s(i).y) : g.moveTo(s(i).x, s(i).y)); g.closePath(); g.fill(); g.lineWidth = u * 0.11; g.stroke();
+    // 머리 구멍: 그림 캐릭터 머리와 같은 크기·위치
+    const Wpx = b.W * api.unit; g.beginPath(); g.arc(s(0).x, s(0).y - Wpx * 0.1, puppetHeadRadius(Wpx) * 1.05, 0, 7); g.fill();
+    cx += s(0).x / defs.length; cy += (s(11).y + s(23).y) / 2 / defs.length;
+  });
   g.globalCompositeOperation = 'source-over';
   g.strokeStyle = '#9C86D8'; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, H - 10);
-  return { canvas: c, cx: s(0).x, cy: (s(11).y + s(23).y) / 2 };
+  return { canvas: c, cx, cy };
 }
 
+const n = (api) => api.duo ? 2 : 1;
+
 start({
-  id: 'human-tetris', cat: 'team', view: 'camera', emoji: '🧱', title: '인간 테트리스',
-  desc: '벽이 가까워지면 벽에 뚫린 구멍 모양대로 몸을 맞춰 통과해요.',
+  id: 'human-tetris', cat: 'team', view: 'camera', emoji: '🧱', title: '인간 테트리스', duo: true,
+  desc: '벽이 가까워지면 벽에 뚫린 구멍 모양대로 몸을 맞춰 통과해요. 둘이 하면 두 사람이 모두 맞춰야 통과!',
   how: ['위에 나온 자세 이름과 벽 구멍 모양을 봐요.', '벽이 닿기 전에 같은 모양으로 몸을 만들어요.', '벽과 벽 사이에는 제자리에서 가볍게 뛰어요.'],
   tip: '벽 구멍과 같은 모양을 만들어요!',
   images: ['star'], bg: 'bg_tetris',
-  keys: '<b>1~9</b> 자세 바꾸기 (1 만세 · 2 T · 3 Y · 4 앉아서 T · 5 별 · 6 ㄴ자 · 7 번개 · 8 한 발 · 9 반대 ㄴ자) · <b>0</b> 차렷',
+  keys: '<b>1~9</b> 자세 바꾸기 (1 만세 · 2 T · 3 Y · 4 앉아서 T · 5 별 · 6 ㄴ자 · 7 번개 · 8 한 발 · 9 반대 ㄴ자) · <b>0</b> 차렷 · 둘이: <b>Shift+숫자</b> = 오른쪽 친구',
   hud: [['pass', '통과'], ['wall', '벽']],
   levels: {
     easy: { name: '하', sub: '처음 해요', travel: 5.0, gap: 1.6, set: ['up', 'T', 'Y', 'squat'] },
@@ -88,62 +94,73 @@ start({
     hard: { name: '상', sub: '도전해요', travel: 3.2, gap: 1.0, set: KEYS },
   },
   onKey(api, e) {
-    const n = parseInt(e.key, 10);
-    if (n >= 1 && n <= 9) api.synth.preset = POSES[KEYS[n - 1]];
-    if (n === 0) api.synth.preset = null;
+    const m = /^Digit(\d)$/.exec(e.code); if (!m) return;
+    const d = +m[1], target = e.shiftKey ? api.synth2 : api.synth;
+    target.preset = d >= 1 && d <= 9 ? POSES[KEYS[d - 1]] : null;
   },
-  init(api, t) { window.__S = S; window.__POSES = POSES; Object.assign(S, { walls: [], pass: 0, fail: 0, next: t + 0.8, hist: [], lastKey: null, count: 0 }); },
+  init(api, t) { window.__S = S; window.__POSES = POSES; Object.assign(S, { walls: [], pass: 0, fail: 0, next: t + 0.8, hist: [[], []], lastKey: null, okNow: [false, false], boneOk: [[], []], count: 0 }); },
   update(api, t, dt) {
-    const L = api.L, lm = api.lm;
+    const L = api.L, N = n(api), people = api.people;
     if (t >= S.next && !S.walls.some(w => !w.done) && api.timeLeft > L.travel + 0.2) {
-      let key; do { key = pick(L.set); } while (key === S.lastKey && L.set.length > 1);
-      S.lastKey = key; S.count++;
-      S.walls.push({ key, def: POSES[key], t0: t, arrive: t + L.travel, done: false, img: makeWall(api, POSES[key]) });
+      const keys = [];
+      for (let k = 0; k < N; k++) { let key; do { key = pick(L.set); } while ((key === S.lastKey || keys.includes(key)) && L.set.length > 2); keys.push(key); }
+      S.lastKey = keys[0]; S.count++;
+      S.walls.push({ keys, defs: keys.map(k => POSES[k]), t0: t, arrive: t + L.travel, done: false, img: makeWall(api, keys.map(k => POSES[k])) });
     }
     const w = S.walls.find(w => !w.done);
-    S.okNow = !!(w && lm && judge(api, lm, w.def));
-    S.hist.push({ t, ok: S.okNow }); S.hist = S.hist.filter(h => t - h.t < 0.6);
+    for (let k = 0; k < N; k++) {
+      const lm = people[k].lm;
+      S.okNow[k] = !!(w && lm && judge(api, lm, w.defs[k], people[k].base, S.boneOk[k]));
+      S.hist[k].push({ t, ok: S.okNow[k] }); S.hist[k] = S.hist[k].filter(h => t - h.t < 0.6);
+    }
     if (w && t >= w.arrive) {
       w.done = true; w.doneT = t;
-      let okTime = 0; for (let i = 1; i < S.hist.length; i++) if (S.hist[i].ok) okTime += S.hist[i].t - S.hist[i - 1].t;
-      w.ok = okTime >= 0.3;
+      w.each = [];
+      // 마지막 0.6초 안에서 0.3초 이상 '이어서' 자세를 유지했는지 (끊어 잡은 자세는 인정 안 함)
+      for (let k = 0; k < N; k++) { let run = 0, best = 0; const h = S.hist[k]; for (let i = 1; i < h.length; i++) { run = h[i].ok && h[i - 1].ok ? run + (h[i].t - h[i - 1].t) : 0; best = Math.max(best, run); } w.each.push(best >= 0.3); }
+      w.ok = w.each.every(Boolean);
       api.react(w.ok ? 'happy' : 'wow', 0.8);
-      if (w.ok) { S.pass++; api.pop('통과! 👏', api.W / 2, api.H * 0.3, '#3A7BEB', 0.08); [659, 880].forEach((f, i) => api.beep(f, 0.15, 'triangle', 0.12, i * 0.1)); api.burst(api.W / 2, api.H * 0.45, '#FFD24D', 18); }
-      else { S.fail++; api.pop('아깝다! 다음 벽!', api.W / 2, api.H * 0.3, '#7B5CC4', 0.06); api.beep(220, 0.2, 'sine', 0.08); }
+      if (w.ok) { S.pass++; api.pop(N > 1 ? '둘 다 통과! 👏' : '통과! 👏', api.W / 2, api.H * 0.3, '#3A7BEB', 0.08); [659, 880].forEach((f, i) => api.beep(f, 0.15, 'triangle', 0.12, i * 0.1)); api.burst(api.W / 2, api.H * 0.45, '#FFD24D', 18); }
+      else { S.fail++; api.pop(N > 1 ? (w.each[0] ? '오른쪽 친구가 아깝다!' : w.each[1] ? '왼쪽 친구가 아깝다!' : '아깝다! 다음 벽!') : '아깝다! 다음 벽!', api.W / 2, api.H * 0.3, '#7B5CC4', 0.06); api.beep(220, 0.2, 'sine', 0.08); }
       S.next = t + L.gap;
     }
     S.walls = S.walls.filter(w => !w.done || t - w.doneT < 0.5);
     api.hud('pass', S.pass); api.hud('wall', S.count);
   },
   draw(api, ctx, t) {
-    const W = api.W, H = api.H;
+    const W = api.W, H = api.H, N = n(api);
     if (api.mode !== 'play') return;
-    const lm = api.lm;
     const w = S.walls[0];
     if (w) {
       const p = Math.min(1, (t - w.t0) / (w.arrive - w.t0));
       let sc = 0.22 + 0.78 * p * p, alpha = 0.55 + 0.4 * p;
-      if (w.done) { const a = (t - w.doneT) / 0.5; sc = 1 + a * 0.6; alpha = (w.ok ? 0.9 : 0.9) * (1 - a); }
+      if (w.done) { const a = (t - w.doneT) / 0.5; sc = 1 + a * 0.6; alpha = 0.9 * (1 - a); }
       ctx.save(); ctx.globalAlpha = alpha;
       ctx.translate(w.img.cx, w.img.cy); ctx.scale(sc, sc); ctx.translate(-w.img.cx, -w.img.cy);
       ctx.drawImage(w.img.canvas, 0, 0); ctx.restore();
       if (!w.done) {
-        api.text(POSES[w.key].name, W / 2, H * 0.1, H * 0.07, '#5B3FB0', 900);
-        const left = w.arrive - t; api.text(left.toFixed(1) + '초', W / 2, H * 0.18, H * 0.04, '#5B3FB0');
+        const name = N > 1 ? w.keys.map(k => POSES[k].name).join('  ·  ') : POSES[w.keys[0]].name;
+        api.text(name, W / 2, H * 0.1, H * 0.065, '#5B3FB0', 900);
+        api.text((w.arrive - t).toFixed(1) + '초', W / 2, H * 0.18, H * 0.04, '#5B3FB0');
       }
     } else if (api.timeLeft > 1) api.text('제자리에서 가볍게 뛰어요!', W / 2, H * 0.12, H * 0.055, '#F26B4F', 900);
     // 맞게 뻗은 팔·다리 끝에 반짝이는 별
-    if (lm && w && !w.done) {
-      [[1, 15], [3, 16], [5, 27], [7, 28]].forEach(([i, end]) => {
-        if (S.boneOk[i] !== true || S.boneOk[i - 1] === false) return;   // 위·아래 마디가 모두 맞을 때만 별
-        const s = api.toScreen(lm[end]); api.drawImg('star', s.x, s.y, api.unit * (0.06 + Math.sin(t * 8 + i) * 0.008), t * 2);
-      });
-      if (S.okNow) api.text('좋아요! 그대로!', W / 2, H * 0.88, H * 0.05, '#1FA67A', 900);
+    if (w && !w.done) {
+      const people = api.people;
+      for (let k = 0; k < N; k++) {
+        const lm = people[k].lm, ok = S.boneOk[k]; if (!lm) continue;
+        [[1, 15], [3, 16], [5, 27], [7, 28]].forEach(([i, end]) => {
+          if (ok[i] !== true || ok[i - 1] === false) return;   // 위·아래 마디가 모두 맞을 때만 별
+          const s = api.toScreen(lm[end]); api.drawImg('star', s.x, s.y, api.unit * (0.06 + Math.sin(t * 8 + i) * 0.008), t * 2);
+        });
+        if (S.okNow[k] && N > 1) { const s = api.toScreen({ x: people[k].base.cx, y: people[k].base.noseY - 0.18 }); api.text('좋아요!', s.x, s.y, H * 0.04, '#1FA67A', 900); }
+      }
+      if (N === 1 && S.okNow[0]) api.text('좋아요! 그대로!', W / 2, H * 0.88, H * 0.05, '#1FA67A', 900);
     }
   },
-  result() {
+  result(api) {
     const total = S.pass + S.fail;
-    return { stats: [[S.pass, '통과한 벽'], [total, '만난 벽']], msg: total ? `벽 ${total}개 중 ${S.pass}개를 통과했어요.` : '' };
+    return { stats: [[S.pass, api.duo ? '둘이 함께 통과' : '통과한 벽'], [total, '만난 벽']], msg: total ? `벽 ${total}개 중 ${S.pass}개를 통과했어요.` : '' };
   },
 });
 </script>
