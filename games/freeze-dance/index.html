@@ -8,7 +8,7 @@
 </head>
 <body>
 <script type="module">
-import { start, rand, clamp, buildBody, drawPuppet } from '../../common/engine.js';
+import { start, rand, clamp, buildBody, drawPuppet, PUPPET_IMAGES } from '../../common/engine.js';
 import { CROWD_IMAGES, drawDancers } from '../../common/crowd.js';
 
 // 춤 선생님 시범 동작: 박자마다 A ↔ B 자세를 오감 (팔·다리 각도, 0=아래 90=옆 180=위)
@@ -45,7 +45,7 @@ start({
   how: ['처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '음악이 나오면 춤 선생님 동작을 따라 온몸으로 춤춰요.', '음악이 멈추면 움직이지 않고 얼음! 다시 나오면 땡!'],
   tip: '선생님을 따라 춤추다가, 음악이 멈추면 얼음!',
   place: '카메라에 친구들이 모두 보이게, 팔을 벌려도 닿지 않게 서요.',
-  images: ['note', 'ice', 'head_happy', 'head_wow', 'head_focus', ...CROWD_IMAGES], bg: 'bg_freeze', puppet: false,
+  images: ['note', 'ice', ...PUPPET_IMAGES, ...CROWD_IMAGES], bg: 'bg_freeze', puppet: false,
   keys: '<b>← →</b>·<b>스페이스</b>·<b>R</b> 움직이기 (얼음일 때는 아무 키도 누르지 않기)',
   hud: [['ok', '얼음 성공']],
   levels: {
@@ -90,8 +90,8 @@ start({
     // 춤 선생님 (가운데): 춤출 땐 박자에 맞춰 동작, 얼음일 땐 멈춘 자세 그대로
     const move = MOVES[Math.max(0, S.move || 0)];
     const tt = !playing ? t : S.phase === 'dance' ? t - S.danceStart : S.freezeStart - S.danceStart;
-    const imgs = { head_happy: api.img('head_happy'), head_wow: api.img('head_wow'), head_focus: api.img('head_focus') };
-    drawPuppet(ctx, teacherPose(move, tt, api.aspect), api.toScreen, { imgs, face: S.phase === 'freeze' && playing ? 'focus' : 'happy', state: S.pst || (S.pst = { size: null, roll: 0 }) });
+    const imgs = Object.fromEntries(PUPPET_IMAGES.map(n => [n, api.img(n)]));
+    drawPuppet(ctx, teacherPose(move, tt, api.aspect), api.toScreen, { imgs, char: S.tchar || (S.tchar = Math.random() < 0.5 ? 'boy' : 'girl'), face: S.phase === 'freeze' && playing ? 'focus' : 'happy', state: S.pst || (S.pst = { size: null, roll: 0 }) });
     if (!playing) return;
     if (S.phase === 'dance') {
       for (const n of S.notes) { const a = t - n.t; api.drawImg('note', n.x * W, (n.y - a * 0.2) * H, H * 0.07, n.r, 1 - a / 1.6); }
