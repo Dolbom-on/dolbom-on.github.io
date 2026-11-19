@@ -17,7 +17,7 @@ function drawKid(api, ctx, t) {
   const hip = lm ? mid(lm[23], lm[24]) : { x: b.cx, y: b.hipY };
   const ground = (b.ankL + b.ankR) / 2 + 0.02, lift = Math.max(0, b.hipY - hip.y);
   const feet = api.toScreen({ x: hip.x, y: ground - lift }), shadow = api.toScreen({ x: hip.x, y: ground });
-  const height = (ground - b.noseY + b.T * 0.5) * api.unit;
+  const height = (ground - b.noseY + b.T * 0.5) * api.unit * 0.5;    // half the child's height so the stones ahead stay visible
   const pose = S.lastMiss && t - S.lastMiss < 0.7 ? 'boops' : (api.jumping || t - S.jumpT < 0.35) ? 'bjump' : 'bstand';
   drawCharSprite(api, ctx, pose, feet.x, feet.y, height, false, shadow.y);
 }
