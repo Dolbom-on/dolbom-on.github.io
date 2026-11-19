@@ -12,29 +12,35 @@ import { start, rand, clamp } from '../../common/engine.js';
 import { CROWD_IMAGES, drawBouncers } from '../../common/crowd.js';
 
 const ACTIONS = ['제자리 뛰기', '점핑잭', '무릎 높이 들기', '스쿼트', '제자리 달리기'];
-const S = { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: 0, stars: [], total: 0 };
+const S = { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: 0, stars: [], total: 0, still: 0, leaking: false };
+const STILL = 0.15;   // motion level below this counts as "standing still"
 
 start({
   id: 'rocket-launch', cat: 'team', view: 'camera', pose: false, energy: true, emoji: '🚀', title: '다 같이 로켓 발사',
   desc: '반 친구들이 다 함께 움직인 만큼 로켓 연료가 차요. 연료가 가득 차면 로켓이 날아올라요!',
-  how: ['처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '시작하면 다 같이 크게 움직여요.', '연료가 가득 차면 로켓 발사! 다음 로켓도 채워요.'],
+  how: ['처음에 2초 가만히, 5초 신나게 움직여 움직임을 재요.', '시작하면 다 같이 크게 움직여요. 가만히 있으면 연료가 새어 나가요!', '연료가 가득 차면 로켓 발사! 다음 로켓도 채워요.'],
   tip: '다 같이 크게 움직여요!',
   place: '카메라에 반 친구들이 모두 보이게 서요. 서로 팔이 닿지 않게 떨어져요.',
   images: ['rocket', 'star', 'cloud', ...CROWD_IMAGES], bg: 'bg_rocket', puppet: false,
   keys: '<b>스페이스</b> 점프 · <b>R</b> 제자리 달리기 · <b>← →</b> 움직이기 (움직일수록 연료가 차요)',
   hud: [['rockets', '발사한 로켓', '대']],
   levels: {
-    easy: { name: '하', sub: '처음 해요', target: 10, actions: false },
-    mid:  { name: '중', sub: '익숙해요', target: 13, actions: true },
-    hard: { name: '상', sub: '도전해요', target: 16, actions: true },
+    // leak: fuel lost per second while (almost) nobody moves (A < STILL); grace: seconds of stillness before it starts
+    easy: { name: '하', sub: '처음 해요', target: 10, actions: false, leak: 0.5, grace: 1.5 },
+    mid:  { name: '중', sub: '익숙해요', target: 13, actions: true, leak: 0.8, grace: 1.0 },
+    hard: { name: '상', sub: '도전해요', target: 16, actions: true, leak: 1.1, grace: 0.7 },
   },
-  init(api, t) { window.__S = S; Object.assign(S, { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: t, stars: [], total: 0 }); },
+  init(api, t) { window.__S = S; Object.assign(S, { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: t, stars: [], total: 0, still: 0, leaking: false }); },
   update(api, t, dt) {
     const L = api.L, A = api.energy.A;
     const launching = t - S.launch < 2.6;
     if (!launching) {
       const add = A * dt;
       S.fuel += add; S.total += add;
+      // standing still drains the tank (all three levels)
+      S.still = A < STILL ? S.still + dt : 0;
+      S.leaking = S.still > L.grace && S.fuel > 0;
+      if (S.leaking) S.fuel = Math.max(0, S.fuel - L.leak * dt);
       if (S.fuel >= L.target) {
         S.fuel = 0; S.rockets++; S.launch = t;
         api.pop(`${S.rockets}번째 로켓 발사!`, api.W / 2, api.H * 0.3, '#3A7BEB', 0.07);
@@ -71,10 +77,16 @@ start({
     const g = ctx.createLinearGradient(0, by + bh, 0, by); g.addColorStop(0, '#7CC4F2'); g.addColorStop(1, '#3A7BEB');
     ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(bx - bw / 2, by + bh * (1 - f), bw, bh * f, 10); ctx.fill();
     api.text('연료', bx, by - 26, H * 0.03, '#3A7BEB');
-    api.text(Math.round(f * 100) + '%', bx, by + bh + 34, H * 0.035, '#3A7BEB');
+    api.text(Math.round(f * 100) + '%', bx, by + bh + 34, H * 0.035, S.leaking ? '#E2585A' : '#3A7BEB');
+    if (S.leaking) {           // leaking: red drops falling from the bottom of the bar
+      for (let i = 0; i < 3; i++) { const ph = (t * 1.6 + i / 3) % 1; ctx.globalAlpha = 1 - ph; ctx.fillStyle = '#E2585A';
+        ctx.beginPath(); ctx.arc(bx + (i - 1) * bw * 0.35, by + bh + 8 + ph * H * 0.06, bw * 0.13, 0, 7); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
     // 지금 움직임
     const A = clamp(api.energy.A, 0, 1);
-    api.text(A > 0.6 ? '최고예요! 🔥' : A > 0.25 ? '좋아요! 더 크게!' : '다 같이 움직여요!', W / 2, H * 0.86, H * 0.05, A > 0.6 ? '#F26B4F' : '#3A7BEB', 900);
+    if (S.leaking) api.text('가만히 있으면 연료가 새요! 움직여요! 💧', W / 2, H * 0.86, H * 0.05, '#E2585A', 900);
+    else api.text(A > 0.6 ? '최고예요! 🔥' : A > 0.25 ? '좋아요! 더 크게!' : '다 같이 움직여요!', W / 2, H * 0.86, H * 0.05, A > 0.6 ? '#F26B4F' : '#3A7BEB', 900);
     if (L.actions) api.text(`지금 동작: ${ACTIONS[S.action]}`, W / 2, H * 0.2, H * 0.06, '#1F2430', 900);
   },
   result() {
