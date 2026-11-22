@@ -24,7 +24,7 @@ const POSES = {
 };
 const KEYS = Object.keys(POSES);
 const BONES = [['L', 11, 13], ['L', 13, 15], ['R', 12, 14], ['R', 14, 16], ['L', 23, 25], ['L', 25, 27], ['R', 24, 26], ['R', 26, 28]];
-const S = { walls: [], pass: 0, fail: 0, next: 0, hist: [[], []], lastKey: null, okNow: [false, false], boneOk: [[], []], count: 0 };
+const S = { walls: [], pass: 0, fail: 0, next: 0, hist: [[], []], lastKey: null, okNow: [false, false], boneOk: [[], []], count: 0, snap: [0, 0], hold: [false, false], okFor: [0, 0], badFor: [0, 0] };
 
 // 지금 자세가 목표와 맞는지 (b = 그 사람의 기준 몸 크기). boneOk 에 팔다리별 결과를 담음
 function judge(api, lm, def, b, boneOk) {
@@ -62,20 +62,36 @@ function makeWall(api, defs) {
   for (let r = 0; r < 10; r++) { g.beginPath(); g.moveTo(0, r * bh); g.lineTo(W, r * bh); g.stroke();
     for (let x = (r % 2) * bh; x < W; x += bh * 2) { g.beginPath(); g.moveTo(x, r * bh); g.lineTo(x, r * bh + bh); g.stroke(); } }
   g.globalCompositeOperation = 'destination-out';
+  g.strokeStyle = g.fillStyle = '#000';     // fully opaque cutter (the brick lines left a 55% white stroke style -> holes were only half cut)
   let cx = 0, cy = 0;
+  const poses = [];
   defs.forEach((def, k) => {
     const b = api.people[k].base, P = buildBody(Object.assign({}, def, { cx: b.cx, hipY: b.hipY, scale: b.T / 0.2 }));
+    poses.push(P);       // the character snaps to exactly this pose when the child matches it
     const s = (i) => api.toScreen(P[i]), u = api.unit * (b.T / 0.2);
-    g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = u * 0.085;
-    [[11, 13, 15], [12, 14, 16], [23, 25, 27], [24, 26, 28]].forEach(([a, m, e]) => { g.beginPath(); g.moveTo(s(a).x, s(a).y); g.lineTo(s(m).x, s(m).y); g.lineTo(s(e).x, s(e).y); g.stroke(); });
-    g.beginPath(); [11, 12, 24, 23].forEach((i, n) => n ? g.lineTo(s(i).x, s(i).y) : g.moveTo(s(i).x, s(i).y)); g.closePath(); g.fill(); g.lineWidth = u * 0.11; g.stroke();
-    // 머리 구멍: 그림 캐릭터 머리와 같은 크기·위치
-    const Wpx = b.W * api.unit; g.beginPath(); g.arc(s(0).x, s(0).y - Wpx * 0.1, puppetHeadRadius(Wpx) * 1.05, 0, 7); g.fill();
+    // hole a little wider than the character's arms / legs / body so the snapped character fits inside
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    [[11, 13, 15, 0.1], [12, 14, 16, 0.1], [23, 25, 27, 0.13], [24, 26, 28, 0.13]].forEach(([a, m, e, wd]) => { g.lineWidth = u * wd; g.beginPath(); g.moveTo(s(a).x, s(a).y); g.lineTo(s(m).x, s(m).y); g.lineTo(s(e).x, s(e).y); g.stroke(); });
+    g.beginPath(); [11, 12, 24, 23].forEach((i, n) => n ? g.lineTo(s(i).x, s(i).y) : g.moveTo(s(i).x, s(i).y)); g.closePath(); g.fill(); g.lineWidth = u * 0.16; g.stroke();
+    // head hole: same centre as the character's head, sized from this pose's shoulder width
+    const Wpx = Math.hypot(s(12).x - s(11).x, s(12).y - s(11).y); g.beginPath(); g.arc(s(0).x, s(0).y - Wpx * 0.1, puppetHeadRadius(Wpx) * 1.25, 0, 7); g.fill();
     cx += s(0).x / defs.length; cy += (s(11).y + s(23).y) / 2 / defs.length;
   });
   g.globalCompositeOperation = 'source-over';
   g.strokeStyle = '#9C86D8'; g.lineWidth = 10; g.strokeRect(5, 5, W - 10, H - 10);
-  return { canvas: c, cx, cy };
+  return { canvas: c, cx, cy, poses };
+}
+
+// snapping: 0 = draw the child's own pose, 1 = draw the hole's pose. Turns on after 0.1 s of a correct pose, off after 0.25 s of a wrong one
+function updateSnap(t, dt, N, w) {
+  for (let k = 0; k < N; k++) {
+    if (S.okNow[k]) { S.okFor[k] = (S.okFor[k] || 0) + dt; S.badFor[k] = 0; } else { S.badFor[k] = (S.badFor[k] || 0) + dt; S.okFor[k] = 0; }
+    if (S.okFor[k] >= 0.1) S.hold[k] = true;
+    if (S.badFor[k] >= 0.25) S.hold[k] = false;
+    const keepAfterPass = w && w.done && w.each && w.each[k] && t - w.doneT < 0.5;
+    const want = (w && !w.done && S.hold[k]) || keepAfterPass ? 1 : 0;
+    S.snap[k] += Math.sign(want - S.snap[k]) * Math.min(Math.abs(want - S.snap[k]), dt / 0.2);
+  }
 }
 
 const n = (api) => api.duo ? 2 : 1;
@@ -98,7 +114,15 @@ start({
     const d = +m[1], target = e.shiftKey ? api.synth2 : api.synth;
     target.preset = d >= 1 && d <= 9 ? POSES[KEYS[d - 1]] : null;
   },
-  init(api, t) { window.__S = S; window.__POSES = POSES; Object.assign(S, { walls: [], pass: 0, fail: 0, next: t + 0.8, hist: [[], []], lastKey: null, okNow: [false, false], boneOk: [[], []], count: 0 }); },
+  smooth: true,     // one outline around the whole character (no seams at the joints)
+  init(api, t) { window.__S = S; window.__POSES = POSES; Object.assign(S, { walls: [], pass: 0, fail: 0, next: t + 0.8, hist: [[], []], lastKey: null, okNow: [false, false], boneOk: [[], []], count: 0, snap: [0, 0], hold: [false, false], okFor: [0, 0], badFor: [0, 0] }); },
+  // draw the character blended toward the hole's pose while the child holds the right pose
+  displayPose(api, k, lm) {
+    const w = S.walls[0], s = S.snap[k];
+    if (!w || !w.img.poses || !w.img.poses[k] || s <= 0.001) return null;
+    const P = w.img.poses[k], e = s * s * (3 - 2 * s);
+    return lm.map((p, i) => ({ x: p.x + (P[i].x - p.x) * e, y: p.y + (P[i].y - p.y) * e, v: Math.max(p.v ?? 1, e > 0.5 ? 1 : 0) }));
+  },
   update(api, t, dt) {
     const L = api.L, N = n(api), people = api.people;
     if (t >= S.next && !S.walls.some(w => !w.done) && api.timeLeft > L.travel + 0.2) {
@@ -125,6 +149,7 @@ start({
       S.next = t + L.gap;
     }
     S.walls = S.walls.filter(w => !w.done || t - w.doneT < 0.5);
+    updateSnap(t, dt, N, S.walls[0]);
     api.hud('pass', S.pass); api.hud('wall', S.count);
   },
   draw(api, ctx, t) {
