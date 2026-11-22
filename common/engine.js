@@ -92,6 +92,7 @@ export const CHARS = [{ id: 'bear', name: '곰돌이' }, { id: 'rabbit', name: '
 export const CHAR_IDS = CHARS.map(c => c.id);
 const PART_NAMES = ['torso', 'uarm', 'farm', 'hand', 'thigh', 'shin', 'foot'];
 export const PUPPET_IMAGES = CHAR_IDS.flatMap(c => [...PART_NAMES.map(p => `${c}_${p}`), ...['happy', 'wow', 'focus'].map(f => `${c}_head_${f}`)]);
+export const SMOOTH_IMAGES = CHAR_IDS.flatMap(c => PART_NAMES.map(p => `${c}_${p}_n`));    // outline-free parts (smooth mode)
 const headName = (char, face) => `${char}_head_${face}`;
 // armless whole-body sprites + paw, for the 'paws' character mode
 export const PAW_IMAGES = CHAR_IDS.flatMap(c => [...['astand', 'acrouch', 'ajump', 'akick'].map(p => `${c}_${p}`), `${c}_hand`]);
@@ -132,9 +133,21 @@ function drawSeg(ctx, im, m, A, B, k, flip = false, fixedLen = false) {
   if (im.height - bot > 0) ctx.drawImage(im, 0, bot - 1, im.width, im.height - bot + 1, x0, L - k, w, (im.height - bot + 1) * k);
   ctx.restore();
 }
+// smooth mode: body parts (outline-free copies <id>_<part>_n) are drawn on an off-screen layer, then ONE outline is
+// drawn around the whole silhouette, so elbows / knees / shoulders show no inner seams.
+const SMOOTH = { layer: null, tint: null };
+function smoothLayers(main) {
+  const w = main.canvas.width, h = main.canvas.height;
+  for (const k of ['layer', 'tint']) {
+    if (!SMOOTH[k]) { const c = document.createElement('canvas'); SMOOTH[k] = c.getContext('2d'); }
+    const c = SMOOTH[k].canvas; if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  }
+  return SMOOTH;
+}
 export function drawPuppet(ctx, P, map, opt = {}) {
   const char = CHAR_IDS.includes(opt.char) ? opt.char : CHAR_IDS[0], meta = CHAR_PARTS[char], imgs = opt.imgs || {};
-  const im = (p) => { const x = imgs[`${char}_${p}`]; return x && opt.alt && meta && /torso|uarm|thigh/.test(p) ? altImage(x, meta.cloth) : x; };
+  const smooth = !!opt.smooth && PART_NAMES.every(p => imgs[`${char}_${p}_n`]);
+  const im = (p) => { const x = imgs[`${char}_${p}${smooth ? '_n' : ''}`]; return x && opt.alt && meta && /torso|uarm|thigh/.test(p) ? altImage(x, meta.cloth) : x; };
   if (!meta || PART_NAMES.some(p => !imgs[`${char}_${p}`])) return drawPuppetVector(ctx, P, map, opt);
   const PST = opt.state || PSTBASE;
   const S = (i) => map(P[i]);
@@ -153,6 +166,17 @@ export function drawPuppet(ctx, P, map, opt = {}) {
   // 바닥 그림자
   const aL = S(27), aR = S(28);
   if (ok(27) && ok(28)) { ctx.fillStyle = 'rgba(70,90,60,.16)'; ctx.beginPath(); ctx.ellipse((aL.x + aR.x) / 2, Math.max(aL.y, aR.y) + Wd * 0.16, Wd * 1.05, Wd * 0.17, 0, 0, 7); ctx.fill(); }
+
+  // smooth: draw the body into the off-screen layer, limited to the body's bounding box
+  const out = ctx; let box = null;
+  if (smooth) {
+    const L = smoothLayers(out), tr = out.getTransform(), pts = [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28, 0].filter(ok).map(S);
+    const m = Wd * 1.4;
+    const x0 = Math.min(...pts.map(p => p.x)) - m, x1 = Math.max(...pts.map(p => p.x)) + m, y0 = Math.min(...pts.map(p => p.y)) - m, y1 = Math.max(...pts.map(p => p.y)) + m;
+    box = { x: Math.max(0, Math.floor(x0 * tr.a)), y: Math.max(0, Math.floor(y0 * tr.d)) };
+    box.w = Math.min(L.layer.canvas.width, Math.ceil(x1 * tr.a)) - box.x; box.h = Math.min(L.layer.canvas.height, Math.ceil(y1 * tr.d)) - box.y;
+    ctx = L.layer; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(box.x, box.y, box.w, box.h); ctx.setTransform(tr);
+  }
 
   // 다리: 신발 → 정강이 → 허벅지 (몸 쪽 조각이 위로 덮음)
   for (const [hi, ki, ai] of [[23, 25, 27], [24, 26, 28]]) {
@@ -174,7 +198,7 @@ export function drawPuppet(ctx, P, map, opt = {}) {
   { const nt = lerp(neckB, head, 0.55), d = Math.atan2(nt.y - neckB.y, nt.x - neckB.x);
     ctx.save(); ctx.translate(neckB.x, neckB.y); ctx.rotate(d); const nl = Math.hypot(nt.x - neckB.x, nt.y - neckB.y);
     ctx.fillStyle = meta.skin; ctx.strokeStyle = meta.line; ctx.lineWidth = Math.max(1.5, Wd * 0.025);
-    ctx.beginPath(); ctx.roundRect(-Wd * 0.02, -Wd * 0.13, nl + Wd * 0.04, Wd * 0.26, Wd * 0.1); ctx.fill(); ctx.stroke(); ctx.restore(); }
+    ctx.beginPath(); ctx.roundRect(-Wd * 0.02, -Wd * 0.13, nl + Wd * 0.04, Wd * 0.26, Wd * 0.1); ctx.fill(); if (!smooth) ctx.stroke(); ctx.restore(); }
   // 몸통: 어깨 가운데 → 골반 가운데. 옆으로 돌면 폭만 조금 좁아짐
   { const tw = im('torso'), s0 = [(T.shL[0] + T.shR[0]) / 2, (T.shL[1] + T.shR[1]) / 2], h0 = [(T.hipL[0] + T.hipR[0]) / 2, (T.hipL[1] + T.hipR[1]) / 2];
     const kx = k * clamp(raw / Wd, 0.7, 1.05), L = Math.hypot(hipM.x - neckB.x, hipM.y - neckB.y);
@@ -192,20 +216,38 @@ export function drawPuppet(ctx, P, map, opt = {}) {
     PST.roll += (r - PST.roll) * 0.2;
   } else PST.roll *= 0.9;
   // headScale: image width vs. hole size; headY: where the face centre sits in the image (0 = top, 1 = bottom), ears stick out above
-  if (hi) { const hw = puppetHeadRadius(Wd) * 2 * (meta.headScale || 1), hh = hw * hi.height / hi.width, hc = { x: head.x, y: head.y - Wd * 0.1 };
-    ctx.save(); ctx.translate(hc.x, hc.y); ctx.rotate(PST.roll); ctx.drawImage(hi, -hw / 2, -hh * (meta.headY || 0.55), hw, hh); ctx.restore(); }
-  // 팔: 손 → 아래팔 → 위팔 (머리보다 나중: 얼굴 앞의 손이 보이게)
-  for (const [si, ei, wi] of [[11, 13, 15], [12, 14, 16]]) {
-    const s = S(si);
-    if (!ok(ei)) { drawSeg(ctx, im('uarm'), meta.uarm, s, { x: s.x, y: s.y + Wd }, kA, isLeft(s)); continue; }
-    const e = S(ei), left = isLeft(s);
-    if (ok(wi)) {
-      const w = S(wi);
-      if (opt.hands !== false) drawSeg(ctx, im('hand'), meta.hand, w, { x: w.x + (w.x - e.x), y: w.y + (w.y - e.y) }, kA * (meta.handK || 1), !left, true);
-      drawSeg(ctx, im('farm'), meta.farm, e, w, kA, left);
+  const drawHead = (c) => { if (hi) { const hw = puppetHeadRadius(Wd) * 2 * (meta.headScale || 1), hh = hw * hi.height / hi.width, hc = { x: head.x, y: head.y - Wd * 0.1 };
+    c.save(); c.translate(hc.x, hc.y); c.rotate(PST.roll); c.drawImage(hi, -hw / 2, -hh * (meta.headY || 0.55), hw, hh); c.restore(); } };
+  // 팔: 손 → 아래팔 → 위팔
+  const drawArms = (c) => {
+    for (const [si, ei, wi] of [[11, 13, 15], [12, 14, 16]]) {
+      const s = S(si);
+      if (!ok(ei)) { drawSeg(c, im('uarm'), meta.uarm, s, { x: s.x, y: s.y + Wd }, kA, isLeft(s)); continue; }
+      const e = S(ei), left = isLeft(s);
+      if (ok(wi)) {
+        const w = S(wi);
+        if (opt.hands !== false) drawSeg(c, im('hand'), meta.hand, w, { x: w.x + (w.x - e.x), y: w.y + (w.y - e.y) }, kA * (meta.handK || 1), !left, true);
+        drawSeg(c, im('farm'), meta.farm, e, w, kA, left);
+      }
+      drawSeg(c, im('uarm'), meta.uarm, s, e, kA, left);
     }
-    drawSeg(ctx, im('uarm'), meta.uarm, s, e, kA, left);
+  };
+  if (!smooth) { drawHead(ctx); drawArms(ctx); return; }      // arms after the head: a hand in front of the face stays visible
+  // smooth: arms into the layer too, then one outline around the whole body, then the head on top
+  drawArms(ctx);
+  const L = SMOOTH, bx = box;
+  if (bx.w > 0 && bx.h > 0) {
+    const t = L.tint; t.setTransform(1, 0, 0, 1, 0, 0);
+    t.globalCompositeOperation = 'copy'; t.drawImage(L.layer.canvas, bx.x, bx.y, bx.w, bx.h, bx.x, bx.y, bx.w, bx.h);
+    t.globalCompositeOperation = 'source-in'; t.fillStyle = meta.line || '#7A5442'; t.fillRect(bx.x, bx.y, bx.w, bx.h);
+    t.globalCompositeOperation = 'source-over';
+    const tr = out.getTransform(), r = Math.max(2, Wd * 0.045) * tr.a;
+    out.save(); out.setTransform(1, 0, 0, 1, 0, 0);
+    for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; out.drawImage(t.canvas, bx.x, bx.y, bx.w, bx.h, bx.x + Math.cos(a) * r, bx.y + Math.sin(a) * r, bx.w, bx.h); }
+    out.drawImage(L.layer.canvas, bx.x, bx.y, bx.w, bx.h, bx.x, bx.y, bx.w, bx.h);
+    out.restore();
   }
+  drawHead(out);
 }
 export function drawPuppetVector(ctx, P, map, opt = {}) {
   const PC = opt.colors ? { ...PCBASE, ...opt.colors } : PCBASE;
@@ -443,6 +485,7 @@ export function start(cfg) {
   const IMG = {};
   const imgList = [...(cfg.images || []),
     ...(view === 'camera' && cfg.puppet === 'paws' ? PAW_IMAGES : view === 'camera' && cfg.puppet !== false ? PUPPET_IMAGES : []),
+    ...(cfg.smooth ? SMOOTH_IMAGES : []),
     ...(view === 'scene' ? (cfg.images || []).filter(n => /^kid_(run1|run2|jump|oops|cheer)$/.test(n)).flatMap(n => CHAR_IDS.map(c => `${c}_${n.slice(4)}`)) : [])];   // side-view sprites of each character
   const loads = [];
   const load = (src, ok) => loads.push(new Promise(res => { const im = new Image(); im.onload = () => { ok(im); res(); }; im.onerror = () => res(); im.src = src; }));
@@ -786,11 +829,13 @@ export function start(cfg) {
       if (body.lm && body.visible && mode !== 'start' && base.ok) drawPawKid(t, body.lm, base, pstate[0], CH[0]);
       return;
     }
+    // cfg.displayPose(api, k, lm, t) may return the landmarks to draw (e.g. human-tetris snaps the character into the hole)
+    const shown = (k, lm) => (cfg.displayPose && cfg.displayPose(api, k, lm, t)) || lm;
     if (cfg.puppet !== false && body.lm && body.visible && mode !== 'start') {
-      drawPuppet(ctx, body.lm, toScreen, { face: t < faceUntil ? faceName : (jump.air ? 'happy' : 'focus'), hands: cfg.hands !== false, imgs: IMG, refW: base.ok ? base.W * VR.h : 0, state: pstate[0], char: CH[0] });
+      drawPuppet(ctx, shown(0, body.lm), toScreen, { face: t < faceUntil ? faceName : (jump.air ? 'happy' : 'focus'), hands: cfg.hands !== false, imgs: IMG, refW: base.ok ? base.W * VR.h : 0, state: pstate[0], char: CH[0], smooth: !!cfg.smooth });
     }
     if (duo && cfg.puppet !== false && body2.lm && body2.visible && mode !== 'start') {
-      drawPuppet(ctx, body2.lm, toScreen, { face: t < faceUntil ? faceName : 'focus', hands: cfg.hands !== false, imgs: IMG, refW: base2.ok ? base2.W * VR.h : 0, state: pstate[1], colors: SHIRT2, char: CH[1], alt: CH[0] === CH[1] });
+      drawPuppet(ctx, shown(1, body2.lm), toScreen, { face: t < faceUntil ? faceName : 'focus', hands: cfg.hands !== false, imgs: IMG, refW: base2.ok ? base2.W * VR.h : 0, state: pstate[1], colors: SHIRT2, char: CH[1], alt: CH[0] === CH[1], smooth: !!cfg.smooth });
     }
   }
   // 'paws' character (cfg.puppet === 'paws'): one armless whole-body sprite standing where the child stands
