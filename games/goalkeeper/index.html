@@ -28,7 +28,7 @@ start({
   puppet: 'paws',   // armless sprite + paws at the hands (2026-11-22)
   images: ['ball', 'glove_keeper', 'star'], bg: 'bg_goal', hands: false,
   need: [25, 26, 27, 28], needMsg: '무릎과 발끝까지 화면에 보이게 조금 뒤로 가 주세요',
-  keys: '<b>마우스</b>로 손 움직이기 · <b>← →</b> 옆으로 · <b>↓</b> 쪼그려 앉기',
+  keys: '<b>마우스</b>로 손 움직이기 · <b>← →</b> 옆으로 · <b>↓</b> 누른 채 쪼그려 앉아 낮은 공 막기',
   hud: [['saves', '막은 공'], ['combo', '연속']],
   levels: {
     easy: { name: '하', sub: '처음 해요', travel: 2.3, gap: [1.0, 1.4], reach: [0.7, 1.1], low: false, win: 0.25, r: 0.5 },
@@ -41,9 +41,11 @@ start({
     if (t >= S.next && !S.balls.some(x => !x.done) && api.timeLeft > L.travel + 0.3) {
       // 표적 위치는 공을 찰 때의 기준으로 고정 (아이를 따라 움직이지 않음)
       const side = pick([-1, 1]), height = L.low ? pick(['high', 'mid', 'low']) : pick(['high', 'mid']);
-      const y = height === 'high' ? b.shY - 0.25 * b.T : height === 'mid' ? b.shY + 0.35 * b.T : (b.ankL + b.ankR) / 2 - 0.25 * b.T;           // 낮은 공: 발목 바로 위 (발을 옆으로 내디뎌 막음)
+      // low ball: shin height (squat and reach down, or step a foot out); it was just above the ankle and out of reach for many kids
+      const y = height === 'high' ? b.shY - 0.25 * b.T : height === 'mid' ? b.shY + 0.35 * b.T : (b.ankL + b.ankR) / 2 - 0.4 * b.T;
       const x = clamp(b.cx + side * b.W * rand(L.reach[0], L.reach[1]), 0.1, api.aspect - 0.1);
-      S.balls.push({ tx: x, ty: y, sx: api.aspect / 2 + rand(-0.1, 0.1), sy: 0.18, t0: t, arrive: t + L.travel, done: false, low: height === 'low', best: 9, spin: rand(-3, 3) });
+      const low = height === 'low';
+      S.balls.push({ tx: x, ty: y, sx: api.aspect / 2 + rand(-0.1, 0.1), sy: 0.18, t0: t, arrive: t + L.travel, done: false, low, r: L.r * (low ? 1.15 : 1), best: 9, spin: rand(-3, 3) });
     }
     for (const ball of S.balls) {
       if (ball.done) continue;
@@ -55,7 +57,7 @@ start({
       if (t > ball.arrive + L.win) {
         ball.done = true; ball.doneT = t;
         const s = api.toScreen({ x: ball.tx, y: ball.ty });
-        if (ball.best <= L.r) { ball.saved = true; S.saves++; S.combo++; S.best = Math.max(S.best, S.combo); api.pop(S.combo >= 3 ? `${S.combo}연속 선방!` : '선방!', s.x, s.y - 60, '#1FA67A', 0.05); api.burst(s.x, s.y, '#FFD24D', 16); api.beep(784, 0.1); api.beep(1046, 0.12, 'triangle', 0.1, 0.08); }
+        if (ball.best <= ball.r) { ball.saved = true; S.saves++; S.combo++; S.best = Math.max(S.best, S.combo); api.pop(S.combo >= 3 ? `${S.combo}연속 선방!` : '선방!', s.x, s.y - 60, '#1FA67A', 0.05); api.burst(s.x, s.y, '#FFD24D', 16); api.beep(784, 0.1); api.beep(1046, 0.12, 'triangle', 0.1, 0.08); }
         else { S.goals++; S.combo = 0; api.pop('아깝다!', s.x, s.y - 60, '#5B6170', 0.045); api.beep(240, 0.18, 'sine', 0.08); }
         S.next = t + rand(L.gap[0], L.gap[1]);
       }
@@ -72,7 +74,7 @@ start({
       let size = (0.04 + 0.1 * p * p) * u, a = 1;
       if (ball.done) { const k = (t - ball.doneT) / 0.6; a = 1 - k; if (ball.saved) { y -= k * 0.2; x += (ball.tx < b.cx ? -1 : 1) * k * 0.2; } else { size *= 1 + k; } }
       const s = api.toScreen({ x, y });
-      if (!ball.done && p > 0.4) { const tg = api.toScreen({ x: ball.tx, y: ball.ty }); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 4; ctx.setLineDash([6, 8]); ctx.beginPath(); ctx.arc(tg.x, tg.y, b.W * api.L.r * u, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
+      if (!ball.done && p > 0.4) { const tg = api.toScreen({ x: ball.tx, y: ball.ty }); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 4; ctx.setLineDash([6, 8]); ctx.beginPath(); ctx.arc(tg.x, tg.y, b.W * ball.r * u, 0, 7); ctx.stroke(); ctx.setLineDash([]); }
       api.drawImg('ball', s.x, s.y, size * 2, t * ball.spin, a) || (ctx.fillStyle = '#fff', ctx.beginPath(), ctx.arc(s.x, s.y, size, 0, 7), ctx.fill());
     }
     drawGloves(api);
