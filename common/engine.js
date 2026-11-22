@@ -93,6 +93,8 @@ export const CHAR_IDS = CHARS.map(c => c.id);
 const PART_NAMES = ['torso', 'uarm', 'farm', 'hand', 'thigh', 'shin', 'foot'];
 export const PUPPET_IMAGES = CHAR_IDS.flatMap(c => [...PART_NAMES.map(p => `${c}_${p}`), ...['happy', 'wow', 'focus'].map(f => `${c}_head_${f}`)]);
 const headName = (char, face) => `${char}_head_${face}`;
+// armless whole-body sprites + paw, for the 'paws' character mode
+export const PAW_IMAGES = CHAR_IDS.flatMap(c => [...['astand', 'acrouch', 'ajump', 'akick'].map(p => `${c}_${p}`), `${c}_hand`]);
 // 같은 캐릭터를 둘이 고르면 두 번째 친구 옷 색만 바꿈 (옷 색 범위의 픽셀만 색상 회전, 한 번 만들어 둠)
 const ALTC = new Map();
 function altImage(im, cloth) {
@@ -440,7 +442,7 @@ export function start(cfg) {
   // 그림
   const IMG = {};
   const imgList = [...(cfg.images || []),
-    ...(view === 'camera' && cfg.puppet !== false ? PUPPET_IMAGES : []),
+    ...(view === 'camera' && cfg.puppet === 'paws' ? PAW_IMAGES : view === 'camera' && cfg.puppet !== false ? PUPPET_IMAGES : []),
     ...(view === 'scene' ? (cfg.images || []).filter(n => /^kid_(run1|run2|jump|oops|cheer)$/.test(n)).flatMap(n => CHAR_IDS.map(c => `${c}_${n.slice(4)}`)) : [])];   // side-view sprites of each character
   const loads = [];
   const load = (src, ok) => loads.push(new Promise(res => { const im = new Image(); im.onload = () => { ok(im); res(); }; im.onerror = () => res(); im.src = src; }));
@@ -780,11 +782,53 @@ export function start(cfg) {
     }
     cfg.drawBack && cfg.drawBack(api, ctx, t);
     // 몸을 찾았을 때만 캐릭터를 그림 (장갑 등 놀이 그림과 같은 기준)
+    if (cfg.puppet === 'paws') {
+      if (body.lm && body.visible && mode !== 'start' && base.ok) drawPawKid(t, body.lm, base, pstate[0], CH[0]);
+      return;
+    }
     if (cfg.puppet !== false && body.lm && body.visible && mode !== 'start') {
       drawPuppet(ctx, body.lm, toScreen, { face: t < faceUntil ? faceName : (jump.air ? 'happy' : 'focus'), hands: cfg.hands !== false, imgs: IMG, refW: base.ok ? base.W * VR.h : 0, state: pstate[0], char: CH[0] });
     }
     if (duo && cfg.puppet !== false && body2.lm && body2.visible && mode !== 'start') {
       drawPuppet(ctx, body2.lm, toScreen, { face: t < faceUntil ? faceName : 'focus', hands: cfg.hands !== false, imgs: IMG, refW: base2.ok ? base2.W * VR.h : 0, state: pstate[1], colors: SHIRT2, char: CH[1], alt: CH[0] === CH[1] });
+    }
+  }
+  // 'paws' character (cfg.puppet === 'paws'): one armless whole-body sprite standing where the child stands
+  // (stand / crouch / jump / kick picked from the pose) + paws floating at the real hand positions.
+  // Hits are still judged from the real hands, so this only changes the look.
+  function drawPawKid(t, lm, b, st, char) {
+    const ok = (i) => lm[i] && (lm[i].v ?? 1) >= 0.5;
+    const hip = mid(lm[23], lm[24]), ground = (b.ankL + b.ankR) / 2 + 0.01;
+    const drop = (hip.y - b.hipY) / b.T, liftL = ok(27) ? (b.ankL - lm[27].y) / b.T : 0, liftR = ok(28) ? (b.ankR - lm[28].y) / b.T : 0;
+    let want = 'astand', flip = false;
+    const rise = (b.hipY - hip.y) / b.T;
+    if (jump.air || (rise > 0.12 && Math.min(liftL, liftR) > 0.1)) want = 'ajump';          // both feet up = jump
+    else if (Math.max(liftL, liftR) > 0.22 && Math.abs(liftL - liftR) > 0.18) {                // one foot up = kick (sprite kicks to the viewer's right)
+      want = 'akick'; const a = liftL > liftR ? lm[27] : lm[28]; flip = a.x < hip.x;
+    }
+    else if (duck.on || drop > 0.22) want = 'acrouch';
+    // keep a pose at least 0.15 s so the sprite does not flicker on the threshold
+    if (want !== st.pp && (!st.ppT || t - st.ppT > 0.15)) { st.pp = want; st.ppT = t; st.flip = flip; }
+    const pose = st.pp || 'astand';
+    const ref = IMG[`${char}_astand`], im = IMG[`${char}_${pose}`] || ref;
+    const u = VR.h, lift = jump.air ? Math.max(0, b.hipY - hip.y) : 0;
+    const feet = toScreen({ x: hip.x, y: ground - lift }), shadow = toScreen({ x: hip.x, y: ground });
+    const height = (ground - b.noseY + b.T * 0.5) * u;
+    ctx.fillStyle = 'rgba(60,80,60,.16)'; ctx.beginPath(); ctx.ellipse(shadow.x, shadow.y, height * 0.2, height * 0.045, 0, 0, 7); ctx.fill();
+    if (im && ref) {
+      const k = height / ref.height, w = im.width * k, h = im.height * k;
+      ctx.save(); ctx.translate(feet.x, feet.y); if (pose === 'akick' && st.flip) ctx.scale(-1, 1); ctx.drawImage(im, -w / 2, -h, w, h); ctx.restore();
+    }
+    if (cfg.hands === false) return;            // game draws its own gloves
+    const paw = IMG[`${char}_hand`]; if (!paw) return;
+    const pw = b.W * u * 0.8;
+    for (const [ei, wi] of [[13, 15], [14, 16]]) {
+      if (!ok(wi)) continue;
+      const w = toScreen(lm[wi]), e = ok(ei) ? toScreen(lm[ei]) : { x: w.x, y: w.y - 1 };
+      const ang = Math.atan2(w.y - e.y, w.x - e.x), c = { x: w.x + Math.cos(ang) * pw * 0.25, y: w.y + Math.sin(ang) * pw * 0.25 };
+      const ph = pw * paw.height / paw.width;
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(ang - Math.PI / 2); if (lm[wi].x < hip.x) ctx.scale(-1, 1);
+      ctx.drawImage(paw, -pw / 2, -ph / 2, pw, ph); ctx.restore();
     }
   }
   let faceName = 'happy', faceUntil = 0;
