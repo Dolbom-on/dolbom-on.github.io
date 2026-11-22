@@ -546,7 +546,8 @@ export function start(cfg) {
     if (s.hand) {     // 마우스 쪽 손을 마우스 위치로
       const side = s.hand.x < s.cx ? 'L' : 'R';
       const sh = P[side === 'L' ? 11 : 12];
-      let tx = s.hand.x, ty = s.hand.y; const d = Math.hypot(tx - sh.x, ty - sh.y), reach = 0.19;
+      // arm reach; when squatting the child would also bend the body, so the hand reaches further (low balls / low cards)
+      let tx = s.hand.x, ty = s.hand.y; const d = Math.hypot(tx - sh.x, ty - sh.y), reach = 0.19 + 0.11 * s.squat;
       if (d > reach) { tx = sh.x + (tx - sh.x) / d * reach; ty = sh.y + (ty - sh.y) / d * reach; }
       const el = { x: (sh.x + tx) / 2 + (side === 'L' ? -0.02 : 0.02), y: (sh.y + ty) / 2 + 0.02 };
       const iw = side === 'L' ? 15 : 16, ie = side === 'L' ? 13 : 14;
