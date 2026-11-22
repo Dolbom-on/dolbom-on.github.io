@@ -28,6 +28,7 @@ start({
   desc: '몸 둘레에 놓인 카드를 손으로 뒤집어 같은 그림 두 장을 찾아요.',
   how: ['카드 위에 손을 대고 잠깐 기다리면 카드가 뒤집혀요.', '두 장을 뒤집어 같은 그림이면 짝 성공!', '먼 카드는 옆으로 걸어가고, 낮은 카드는 쪼그려 앉아서 뒤집어요.'],
   tip: '손을 카드에 대고 잠깐 기다려요!',
+  puppet: 'paws',   // armless sprite + paws at the hands (2026-11-22)
   images: [...FACES, 'card_back', 'card_front'], bg: 'bg_tetris',
   keys: '<b>마우스</b>를 카드 위에 잠깐 올리기 · <b>← →</b> 옆으로 · <b>↓</b> 쪼그려 앉기',
   hud: [['pairs', '찾은 짝'], ['boards', '다 맞힌 판']],
