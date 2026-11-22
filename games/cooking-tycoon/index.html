@@ -53,6 +53,7 @@ start({
   desc: '주문서를 보고 몸 둘레의 재료를 손으로 모아 요리를 완성해요. 다 모으면 점프해서 내보내요!',
   how: ['위의 주문서에서 만들 요리와 재료를 확인해요.', '재료 위에 손을 대고 잠깐 기다리면 접시에 담겨요. 다른 재료는 담기지 않아요.', '재료를 다 모으면 두 발로 점프! 요리가 완성돼요.'],
   tip: '재료를 모으고 점프로 완성!',
+  puppet: 'paws',   // armless sprite + paws at the hands (2026-11-22)
   images: [...ALL, 'plate', 'bell', 'chef_hat', 'star', ...Object.values(RECIPES).flat().map(r => r.dish)], bg: 'bg_kitchen',
   keys: '<b>마우스</b>를 재료 위에 잠깐 올리기 · <b>← →</b> 옆으로 · <b>↓</b> 쪼그려 앉기 · <b>스페이스</b> 점프(완성)',
   hud: [['dishes', '완성한 요리']],
