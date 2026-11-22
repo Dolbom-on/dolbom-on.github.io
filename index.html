@@ -55,7 +55,7 @@
   .tab:focus-visible, .card:focus-visible, .lv label:focus-within, .btn:focus-visible { outline: 3px solid #F5B400; outline-offset: 2px; }
 
   /* 카드 */
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; padding-bottom: 40px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; padding-bottom: 40px; margin-top: 28px; }
   .card {
     all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column;
     background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
@@ -146,19 +146,18 @@
   <header>
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span>건강한 돌봄놀이터</div>
     <h1>돌봄놀이터 <span class="on">온(ON)</span></h1>
-    <p class="lead">카메라 앞에서 몸을 움직여 노는 놀이 12가지예요. 놀이를 고르고 난이도를 정한 뒤 시작해요.</p>
+    <p class="lead">「건강한 돌봄놀이터」의 에듀테크 신체활동 프로그램 12가지를 소개합니다. 놀이를 고르고 난이도를 정해 바로 시작할 수 있어요.</p>
     <div class="ready" aria-label="놀이 전 준비">
       <div><span class="ic" aria-hidden="true">💻</span><span><b>준비물</b>카메라가 있는 컴퓨터, TV나 프로젝터</span></div>
-      <div><span class="ic" aria-hidden="true">📏</span><span><b>자리</b>카메라에서 약 3m, 머리부터 발까지 보이게</span></div>
+      <div><span class="ic" aria-hidden="true">📏</span><span><b>위치</b>카메라에서 약 3m, 머리부터 발까지 보이게</span></div>
       <div><span class="ic" aria-hidden="true">🔒</span><span><b>영상</b>이 컴퓨터 안에서만 쓰고 저장하거나 보내지 않아요</span></div>
     </div>
   </header>
 
-  <nav class="tabs" id="tabs" aria-label="놀이 분류"></nav>
   <main class="grid" id="grid" aria-live="polite"></main>
 
   <section class="guide" aria-labelledby="guide-h">
-    <h2 id="guide-h">선생님 안내</h2>
+    <h2 id="guide-h">세팅 방법</h2>
     <ol>
       <li>컴퓨터를 TV나 프로젝터에 연결하고, 카메라를 화면 위나 아래에 둡니다.</li>
       <li>놀이를 고르고 난이도(하·중·상)를 정한 뒤 <b>놀이 시작</b>을 누릅니다. 처음 한 번은 카메라 사용을 허용해야 합니다.</li>
@@ -290,18 +289,7 @@ const GAMES = [
 ];
 
 const $ = (id) => document.getElementById(id);
-let filter = 'all';
 let current = null;
-
-function renderTabs() {
-  const items = [['all', '전체', null], ...Object.entries(KIND).map(([k, c]) => [k, c.name, c.cls])];
-  $('tabs').innerHTML = items.map(([k, name, cls]) => {
-    const n = k === 'all' ? GAMES.length : GAMES.filter(g => g.kind === k).length;
-    const dot = cls ? `<span class="dot ${cls}" style="background:var(--c)"></span>` : '';
-    return `<button class="tab" data-k="${k}" aria-pressed="${k === filter}">${dot}${name}<span class="n">${n}</span></button>`;
-  }).join('');
-  $('tabs').querySelectorAll('.tab').forEach(b => b.onclick = () => { filter = b.dataset.k; renderTabs(); renderGrid(); });
-}
 
 // 그림: img/<id>.jpg, 없으면 이모지로 대신 표시
 function art(g) {
@@ -310,8 +298,7 @@ function art(g) {
 }
 
 function renderGrid() {
-  const list = GAMES.filter(g => filter === 'all' || g.kind === filter);
-  $('grid').innerHTML = list.map(g => {
+  $('grid').innerHTML = GAMES.map(g => {
     const no = String(GAMES.indexOf(g) + 1).padStart(2, '0');
     return `<button class="card ${KIND[g.kind].cls}" data-id="${g.id}" aria-label="${g.name}, ${g.who}">
       <div class="top"><span class="no">${no}</span><span class="who">${g.who}</span>${art(g)}</div>
@@ -340,7 +327,8 @@ function openGame(id, level) {
   dlg.className = KIND[g.kind].cls;
   $('d-hero').querySelectorAll('.emoji, img').forEach(n => n.remove());
   $('d-hero').insertAdjacentHTML('afterbegin', art(g));
-  $('d-cat').textContent = g.kind === 'duo' ? '혼자 · 둘이' : KIND[g.kind].name;
+  $('d-cat').textContent = '';   // no play categories on this site (2026-11-22)
+  $('d-cat').hidden = true;
   $('d-title').textContent = g.name;
   $('d-desc').textContent = g.desc;
   $('d-who').textContent = g.who;
@@ -371,7 +359,6 @@ $('d-close').onclick = closeGame;
 $('dlg').addEventListener('click', e => { if (e.target === $('dlg')) closeGame(); });
 $('d-start').addEventListener('click', e => { if (e.currentTarget.getAttribute('aria-disabled') === 'true') e.preventDefault(); });
 
-renderTabs();
 renderGrid();
 // QR 바로가기: 주소 끝 #놀이id 로 들어오면 그 놀이 창을 바로 연다
 const fromHash = () => { const id = decodeURIComponent(location.hash.slice(1)); if (id) openGame(id); };
