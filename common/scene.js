@@ -34,6 +34,34 @@ export function makeScene() {
   };
 }
 
+// ── Two players, split screen (left half = left friend, right half = right friend) ──
+// viewFor(api, k): an api for one half — W is half the screen, lm/base/jumping/char are that friend's, pop/burst are shifted.
+export function viewFor(api, k) {
+  if (!api.duo) return api;
+  const off = k * api.W / 2;
+  return Object.create(api, {
+    W: { get: () => api.W / 2 }, k: { value: k }, off: { value: off },
+    char: { get: () => api.charOf(k) },
+    lm: { get: () => api.people[k].lm }, base: { get: () => api.people[k].base },
+    visible: { get: () => api.people[k].visible }, jumping: { get: () => api.people[k].jumping },
+    pop: { value: (text, x, y, ...r) => api.pop(text, x + off, y, ...r) },
+    burst: { value: (x, y, ...r) => api.burst(x + off, y, ...r) },
+  });
+}
+// draw fn(view, k) once (one player) or into each half (two players), with a white divider
+export function eachHalf(api, ctx, fn) {
+  if (!api.duo) { fn(api, 0); return; }
+  for (let k = 0; k < 2; k++) {
+    const v = viewFor(api, k);
+    ctx.save(); ctx.beginPath(); ctx.rect(v.off, 0, v.W, api.H); ctx.clip(); ctx.translate(v.off, 0);
+    fn(v, k); ctx.restore();
+  }
+  ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.fillRect(api.W / 2 - 4, 0, 8, api.H);
+  ctx.fillStyle = 'rgba(31,36,48,.12)'; ctx.fillRect(api.W / 2 - 1, 0, 2, api.H);
+}
+// name label at the top of each half
+export function halfLabel(v, text) { if (v.duo) v.text(text, v.W / 2, v.H * 0.11, v.H * 0.034, '#1F2430', 900); }
+
 // Whole-body sprite of the picked mascot, feet at (x, feetY). pose: fstand|fstep|foops (front) or bstand|bjump|boops (back).
 // height = on-screen height of the standing sprite; other poses keep their size relative to it. flip mirrors left/right.
 export const SPRITE_POSES = ['fstand', 'fstep', 'foops', 'bstand', 'bjump', 'boops'];
