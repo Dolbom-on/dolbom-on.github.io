@@ -9,30 +9,33 @@
 <body>
 <script type="module">
 import { start, clamp } from '../../common/engine.js';
-import { makeScene, drawKid } from '../../common/scene.js';
+import { makeScene, drawKid, eachHalf, viewFor, halfLabel } from '../../common/scene.js';
 
-const scene = makeScene();
-const S = { dist: 0, cheetah: 0, steps: 0, speed: 0, puddles: [], stepTimes: [], splash: -9, done: false, finishT: 0, jumpT: -9 };
-const knee = { L: { up: false, last: -9 }, R: { up: false, last: -9 }, lastAny: -9, lastSide: null };
+// one state per friend (two friends = split screen, each races its own cheetah)
+const mk = () => ({ scene: makeScene(), dist: 0, cheetah: 0, steps: 0, speed: 0, puddles: [], stepTimes: [], splash: -9, done: false, finishT: 0, jumpT: -9, jumpsOk: 0, win: null, cheetahDone: false,
+  knee: { L: { up: false, last: -9 }, R: { up: false, last: -9 }, lastAny: -9 } });
+const P = [mk(), mk()];
+const G = { startT: 0 };
 const GY = (api) => api.H * 0.76, KID = (api) => api.H * 0.28;
 const PX_PER_M = (api) => api.W / 30;
+const N = (api) => api.duo ? 2 : 1;
 
-function step(api, side, t) {
+function step(api, S, side, t, k) {
   S.steps++; S.stepTimes.push(t);
-  knee.lastAny = t; knee.lastSide = side; knee[side].last = t;
-  api.beep(side === 'L' ? 600 : 700, 0.05, 'triangle', 0.05);
+  S.knee.lastAny = t; S.knee[side].last = t;
+  api.beep((side === 'L' ? 600 : 700) + k * 80, 0.05, 'triangle', 0.05);
 }
 
 start({
-  id: 'animal-race', cat: 'run', view: 'scene', emoji: '🐆', title: '동물 달리기 경주',
-  desc: '제자리에서 무릎을 높이 들고 뛰면 내 캐릭터가 달려요. 치타보다 먼저 결승선에 들어가 봐요!',
-  how: ['제자리에서 무릎을 번갈아 높이 들며 뛰어요.', '빨리 뛸수록 캐릭터가 빨라져요.', '물웅덩이가 나오면 점프해서 넘어요. (중·상)'],
+  id: 'animal-race', cat: 'run', view: 'scene', emoji: '🐆', title: '동물 달리기 경주', duo: true,
+  desc: '제자리에서 무릎을 높이 들고 뛰면 내 캐릭터가 달려요. 치타보다 먼저 결승선에 들어가 봐요! 둘이 하면 화면이 반으로 나뉘어 함께 달려요.',
+  how: ['제자리에서 무릎을 번갈아 높이 들며 뛰어요. (둘이면 나란히 서서)', '빨리 뛸수록 캐릭터가 빨라져요.', '물웅덩이가 나오면 점프해서 넘어요. (중·상)'],
   tip: '무릎을 높이! 제자리에서 달려요!',
   place: '카메라에서 약 2.5~3m 떨어져, 무릎까지 꼭 보이게 서요.',
   images: ['kid_run1', 'kid_run2', 'kid_jump', 'kid_oops', 'kid_cheer', 'cheetah1', 'cheetah2', 'puddle', 'flag', 'tree', 'bush', 'cloud'],
-  keys: '<b>R</b> 누르고 있으면 제자리 달리기 · <b>스페이스</b> 점프',
+  keys: '<b>R</b> 누르고 있으면 제자리 달리기 · <b>스페이스</b> 점프 · 둘이: 오른쪽 친구 <b>E</b> 달리기 · <b>W</b> 점프',
   need: [25, 26], needMsg: '무릎까지 화면에 보이게 조금 뒤로 가 주세요',
-  hud: [['dist', '내 거리', 'm'], ['steps', '걸음', '번']],
+  hud: [['dist', '거리', 'm'], ['steps', '걸음', '번']],
   duration: 70,
   levels: {
     easy: { name: '하', sub: '처음 해요', length: 100, cheetah: 1.8, puddles: 0 },
@@ -40,80 +43,90 @@ start({
     hard: { name: '상', sub: '도전해요', length: 160, cheetah: 2.8, puddles: 6 },
   },
   init(api, t) {
-    window.__S = S;
-    const L = api.L;
-    Object.assign(S, { dist: 0, cheetah: 0, steps: 0, speed: 0, stepTimes: [], splash: -9, done: false, finishT: 0, startT: t, win: null, jumpT: -9, jumpsOk: 0, cheetahDone: false,
+    window.__S = P[0]; window.__P = P;
+    const L = api.L; G.startT = t;
+    for (const S of P) Object.assign(S, mk(), { scene: S.scene,
       puddles: Array.from({ length: L.puddles }, (_, i) => ({ at: L.length * (i + 1) / (L.puddles + 1), hit: false, judged: false })) });
-    knee.L.up = knee.R.up = false;
   },
-  onJump(api, t) { if (api.mode === 'play') S.jumpT = t; },
+  onJump(api, t, k = 0) { if (api.mode === 'play' && P[k]) P[k].jumpT = t; },
   update(api, t, dt) {
-    const L = api.L, lm = api.lm, b = api.base;
-    // 무릎 들기 감지: 같은 쪽 골반보다 0.35T 안쪽으로 올라오고, 반대 무릎보다 0.15T 높을 때
-    if (lm && !S.done) {
-      for (const [side, ki, hi, oi] of [['L', 25, 23, 26], ['R', 26, 24, 25]]) {
-        if ((lm[ki].v ?? 1) < 0.5) continue;
-        const rel = (lm[ki].y - lm[hi].y) / b.T, higher = (lm[oi].y - lm[ki].y) / b.T;
-        const k = knee[side];
-        if (!k.up && rel < 0.38 && higher > 0.15) {
-          k.up = true;
-          const okGap = t - knee.lastAny > 0.18 && t - k.last > 0.35;
-          if (okGap) step(api, side, t);
-        } else if (k.up && rel > 0.55) k.up = false;
+    const L = api.L;
+    for (let k = 0; k < N(api); k++) {
+      const S = P[k], v = viewFor(api, k), lm = v.lm, b = v.base;
+      // 무릎 들기 감지: 같은 쪽 골반보다 0.38T 안쪽으로 올라오고, 반대 무릎보다 0.15T 높을 때
+      if (lm && !S.done) {
+        for (const [side, ki, hi, oi] of [['L', 25, 23, 26], ['R', 26, 24, 25]]) {
+          if ((lm[ki].v ?? 1) < 0.5) continue;
+          const rel = (lm[ki].y - lm[hi].y) / b.T, higher = (lm[oi].y - lm[ki].y) / b.T;
+          const kn = S.knee[side];
+          if (!kn.up && rel < 0.38 && higher > 0.15) {
+            kn.up = true;
+            if (t - S.knee.lastAny > 0.18 && t - kn.last > 0.35) step(api, S, side, t, k);
+          } else if (kn.up && rel > 0.55) kn.up = false;
+        }
       }
+      // 속도: 최근 3초 걸음 수
+      S.stepTimes = S.stepTimes.filter(s => t - s < 3);
+      let target = clamp(S.stepTimes.length / 3 * 1.6, 0, 6);
+      if (t - S.splash < 1) target *= 0.5;
+      S.speed += (target - S.speed) * (1 - Math.exp(-dt / 0.4));
+      if (!S.done) {
+        S.dist += S.speed * dt;
+        S.cheetah += L.cheetah * dt * clamp((t - G.startT) / 2, 0, 1);
+        for (const p of S.puddles) if (!p.judged && S.dist >= p.at) {
+          p.judged = true;
+          if (t - S.jumpT < 0.6 || v.jumping) { S.jumpsOk++; v.pop('점프 성공!', v.W * 0.3, GY(v) - KID(v) * 1.2); api.beep(880, 0.1); }
+          else { p.hit = true; S.splash = t; v.pop('첨벙!', v.W * 0.3, GY(v) - KID(v) * 1.2, '#3A7BEB'); api.beep(220, 0.15, 'sine', 0.08); }
+        }
+        if (S.dist >= L.length) {
+          S.done = true; S.finishT = t; S.win = S.cheetah < L.length;
+          v.pop(S.win ? '1등! 치타를 이겼어요!' : '결승선 도착!', v.W / 2, v.H * 0.3, '#F26B4F', 0.06); api.beep(1046, 0.3);
+        } else if (S.cheetah >= L.length && !S.cheetahDone) { S.cheetahDone = true; v.pop('치타가 먼저 도착! 끝까지 달려요!', v.W / 2, v.H * 0.25, '#5B6170', 0.04); }
+      }
+      S.scene.scroll(S.speed * PX_PER_M(v) * dt);
     }
-    // 속도: 최근 3초 걸음 수
-    S.stepTimes = S.stepTimes.filter(s => t - s < 3);
-    const rate = S.stepTimes.length / 3;                 // 걸음/초
-    let target = clamp(rate * 1.6, 0, 6);                // m/s
-    if (t - S.splash < 1) target *= 0.5;
-    S.speed += (target - S.speed) * (1 - Math.exp(-dt / 0.4));
-    if (!S.done) {
-      S.dist += S.speed * dt;
-      S.cheetah += L.cheetah * dt * clamp((t - S.startT) / 2, 0, 1);
-      for (const p of S.puddles) if (!p.judged && S.dist >= p.at) {
-        p.judged = true;
-        if (t - S.jumpT < 0.6 || api.jumping) { S.jumpsOk++; api.pop('점프 성공!', api.W * 0.3, GY(api) - KID(api) * 1.2); api.beep(880, 0.1); }
-        else { p.hit = true; S.splash = t; api.pop('첨벙!', api.W * 0.3, GY(api) - KID(api) * 1.2, '#3A7BEB'); api.beep(220, 0.15, 'sine', 0.08); }
-      }
-      if (S.dist >= L.length || S.cheetah >= L.length) {
-        if (S.dist >= L.length) { S.done = true; S.finishT = t; S.win = S.cheetah < L.length; api.pop(S.win ? '1등! 치타를 이겼어요!' : '결승선 도착!', api.W / 2, api.H * 0.3, '#F26B4F', 0.07); api.beep(1046, 0.3); api.finish(); }
-        else if (!S.cheetahDone) { S.cheetahDone = true; api.pop('치타가 먼저 도착! 끝까지 달려요!', api.W / 2, api.H * 0.25, '#5B6170', 0.05); }
-      }
-    }
-    scene.scroll(S.speed * PX_PER_M(api) * dt);
-    api.hud('dist', Math.floor(S.dist)); api.hud('steps', S.steps);
+    if (P.slice(0, N(api)).every(S => S.done)) api.finish();       // everybody crossed the line
+    if (api.duo) { api.hud('dist', `${Math.floor(P[0].dist)} : ${Math.floor(P[1].dist)}`); api.hud('steps', `${P[0].steps} : ${P[1].steps}`); }
+    else { api.hud('dist', Math.floor(P[0].dist)); api.hud('steps', P[0].steps); }
   },
   draw(api, ctx, t) {
-    const gy = GY(api), W = api.W, H = api.H, L = api.L, px = PX_PER_M(api), kx = W * 0.3;
-    scene.draw(api, ctx, gy);
-    const playing = api.mode === 'play' || api.mode === 'countdown';
-    // 물웅덩이 · 결승선
-    for (const p of S.puddles || []) { const x = kx + (p.at - S.dist) * px; if (x > -200 && x < W + 200) api.drawImg('puddle', x, gy + H * 0.01, H * 0.2); }
-    const fx = kx + ((L?.length || 100) - S.dist) * px;
-    if (fx < W + 200) api.drawImg('flag', fx, gy - H * 0.12, H * 0.16);
-    // 치타
-    const cxp = kx + (S.cheetah - S.dist) * px + W * 0.06;
-    const chName = playing && Math.floor(t / 0.14) % 2 ? 'cheetah2' : 'cheetah1';
-    if (cxp > -100 && cxp < W + 100) api.drawImg(chName, cxp, gy - H * 0.07, H * 0.2);
-    else if (playing) api.text(cxp > W ? '치타 ▶' : '◀ 치타', cxp > W ? W - 80 : 80, gy - H * 0.1, H * 0.035, '#C27C1E');
-    // 아이
-    const jt = t - S.jumpT, jh = jt >= 0 && jt < 0.6 ? 4 * (jt / 0.6) * (1 - jt / 0.6) * H * 0.12 : 0;
-    const pose = t - S.splash < 0.5 ? 'oops' : jh > 2 ? 'jump' : S.done ? 'cheer' : 'run';
-    drawKid(api, ctx, kx, gy - jh, KID(api), pose, t * (0.6 + S.speed / 4), S.speed > 0.3, gy);
-    // 위쪽 진행 막대
-    if (playing && L) {
-      const x0 = W * 0.25, x1 = W * 0.75, y = H * 0.16;
-      ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-      ctx.strokeStyle = '#F7C9BC'; ctx.lineWidth = 8; ctx.stroke();
-      const dot = (d, c, label) => { const x = x0 + (x1 - x0) * clamp(d / L.length, 0, 1); ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 12, 0, 7); ctx.fill(); api.text(label, x, y - 26, H * 0.026, c); };
-      dot(S.cheetah, '#E0A030', '치타'); dot(S.dist, '#3A7BEB', '나');
-      api.text('🏁', x1 + 24, y, H * 0.035);
-    }
+    eachHalf(api, ctx, (v, k) => {
+      const S = P[k], gy = GY(v), W = v.W, H = v.H, L = v.L, px = PX_PER_M(v), kx = W * 0.3;
+      S.scene.draw(v, ctx, gy);
+      const playing = v.mode === 'play' || v.mode === 'countdown';
+      for (const p of S.puddles || []) { const x = kx + (p.at - S.dist) * px; if (x > -200 && x < W + 200) v.drawImg('puddle', x, gy + H * 0.01, H * 0.2); }
+      const fx = kx + ((L?.length || 100) - S.dist) * px;
+      if (fx < W + 200) v.drawImg('flag', fx, gy - H * 0.12, H * 0.16);
+      const cxp = kx + (S.cheetah - S.dist) * px + W * 0.06;
+      const chName = playing && Math.floor(t / 0.14) % 2 ? 'cheetah2' : 'cheetah1';
+      if (cxp > -100 && cxp < W + 100) v.drawImg(chName, cxp, gy - H * 0.07, H * 0.2);
+      else if (playing) v.text(cxp > W ? '치타 ▶' : '◀ 치타', cxp > W ? W - 80 : 80, gy - H * 0.1, H * 0.035, '#C27C1E');
+      const jt = t - S.jumpT, jh = jt >= 0 && jt < 0.6 ? 4 * (jt / 0.6) * (1 - jt / 0.6) * H * 0.12 : 0;
+      const pose = t - S.splash < 0.5 ? 'oops' : jh > 2 ? 'jump' : S.done ? 'cheer' : 'run';
+      drawKid(v, ctx, kx, gy - jh, KID(v), pose, t * (0.6 + S.speed / 4), S.speed > 0.3, gy);
+      // progress bar (own cheetah + the other friend)
+      if (playing && L) {
+        const x0 = W * 0.2, x1 = W * 0.8, y = H * (v.duo ? 0.2 : 0.16);
+        ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 14; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
+        ctx.strokeStyle = '#F7C9BC'; ctx.lineWidth = 8; ctx.stroke();
+        const dot = (d, c, label) => { const x = x0 + (x1 - x0) * clamp(d / L.length, 0, 1); ctx.fillStyle = c; ctx.beginPath(); ctx.arc(x, y, 12, 0, 7); ctx.fill(); v.text(label, x, y - 26, H * 0.026, c); };
+        dot(S.cheetah, '#E0A030', '치타');
+        if (v.duo) dot(P[1 - k].dist, '#B8A9D9', '친구');
+        dot(S.dist, '#3A7BEB', '나');
+        v.text('🏁', x1 + 24, y, H * 0.035);
+      }
+      halfLabel(v, `${k ? '오른쪽' : '왼쪽'} 친구 · ${Math.floor(S.dist)}m`);
+    });
   },
   result(api) {
-    const secs = S.finishT ? (S.finishT - S.startT).toFixed(1) : null;
-    return { stats: [[Math.floor(S.dist) + 'm', '달린 거리'], [S.steps, '무릎 들기 걸음'], [secs ? secs + '초' : '—', '결승 기록']],
+    const sec = (S) => S.finishT ? (S.finishT - G.startT).toFixed(1) + '초' : '—';
+    if (api.duo) {
+      const [a, b] = P;
+      const first = a.done && (!b.done || a.finishT <= b.finishT) ? '왼쪽 친구' : b.done ? '오른쪽 친구' : null;
+      return { stats: [[Math.floor(a.dist) + 'm', `왼쪽 친구 (${sec(a)})`], [Math.floor(b.dist) + 'm', `오른쪽 친구 (${sec(b)})`]], msg: first ? `${first}가 먼저 들어왔어요! 둘 다 잘 달렸어요 🐆` : '둘 다 끝까지 열심히 달렸어요!' };
+    }
+    const S = P[0];
+    return { stats: [[Math.floor(S.dist) + 'm', '달린 거리'], [S.steps, '무릎 들기 걸음'], [sec(S), '결승 기록']],
       msg: S.done ? (S.win ? '치타보다 먼저 들어왔어요! 🐆' : '끝까지 달렸어요!') : '조금만 더 빨리 무릎을 들면 결승선에 닿을 수 있어요.' };
   },
 });
