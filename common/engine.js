@@ -456,6 +456,7 @@ export function start(cfg) {
   ${cfg.duo ? '<div class="lv duo" id="duo-pick"></div>' : ''}
   ${showChar ? '<div class="lv char" id="char-pick"></div>' : ''}
   <div class="lv" id="lv-start"></div>
+  <div class="cam-pick" id="cam-pick" hidden><label for="cam-sel">카메라</label><select id="cam-sel"></select></div>
   <button class="btn" id="go-cam">📷 카메라로 시작</button>
   <button class="btn sub" id="go-key">⌨️ 카메라 없이 연습</button>
   <p class="err" id="err" hidden></p>
@@ -534,7 +535,8 @@ export function start(cfg) {
 
   // ── 카메라 없이 연습: 가상 몸 ──
   const synth = { cx: ASPECT / 2, squat: 0, squatTarget: 0, jumpT: -9, hand: null, kick: { side: null, t: -9 }, knees: false, preset: null, keys: {}, pumpL: 0, pumpR: 0, prevLm: null };
-  const synth2 = { cx: ASPECT / 2 + 0.3, preset: null };       // 연습 모드 두 번째 친구 (자세만)
+  const synth2 = { cx: ASPECT / 2 + 0.3, preset: null, jumpT: -9, knees: false, keys: {} };   // 연습 모드 두 번째 친구 (W 점프 · E 제자리 달리기 · A/D 옆으로)
+  const jump2 = { air: false, airSince: 0, upHold: 0 };      // second friend's jump (duo games)
   function synthBody(now) {
     const s = synth;
     s.squat += (s.squatTarget - s.squat) * 0.25;
@@ -653,7 +655,15 @@ export function start(cfg) {
       }
       return;
     }
-    if (base2.ok && Math.abs((base2.cy - m.cy) / base2.T) < 0.1) {   // 서 있을 때 기준을 천천히 따라감
+    // jump (same rule as the first friend); games get cfg.onJump(api, t, 1)
+    if (base2.ok) {
+      const rise = (base2.cy - m.cy) / base2.T, UP = 0.16 / SENS, DOWN = 0.07 / SENS;
+      if (!jump2.air) {
+        if (rise > UP) { jump2.upHold += dt; if (jump2.upHold >= 0.05) { jump2.air = true; jump2.airSince = now; jump2.upHold = 0; if (cfg.onJump) cfg.onJump(api, now, 1); } }
+        else jump2.upHold = 0;
+      } else if (rise < DOWN || now - jump2.airSince > 1.5) jump2.air = false;
+    }
+    if (base2.ok && !jump2.air && Math.abs((base2.cy - m.cy) / base2.T) < 0.1) {   // 서 있을 때 기준을 천천히 따라감
       const k = 1 - Math.exp(-dt / 3);
       base2.cy += (m.cy - base2.cy) * k; base2.shY += (m.shY - base2.shY) * k; base2.hipY += (m.hipY - base2.hipY) * k; base2.cx += (m.cx - base2.cx) * k;
     }
@@ -740,9 +750,10 @@ export function start(cfg) {
     toScreen, fromScreen, get unit() { return VR.h; }, get rect() { return VR; }, get aspect() { return input === 'camera' ? VA : ASPECT; },
     img: (n) => IMG[n] || null, beep, synth, synth2,
     get duo() { return duo; },
-    get char() { return CH[0]; },          // 고른 캐릭터 'boy' | 'girl'
+    get char() { return CH[0]; },          // picked character of the (first) friend
+    charOf: (k) => CH[k] || CH[0],          // picked character of friend k (0 = left, 1 = right)
     // 사람별 정보 (0 = 왼쪽/혼자, 1 = 오른쪽 친구)
-    get people() { return [{ lm: body.visible ? body.lm : null, base, visible: body.visible }, { lm: body2.visible ? body2.lm : null, base: base2, visible: body2.visible }]; },
+    get people() { return [{ lm: body.visible ? body.lm : null, base, visible: body.visible, jumping: jump.air }, { lm: body2.visible ? body2.lm : null, base: base2, visible: body2.visible, jumping: jump2.air }]; },
     react(name, dur = 0.6) { faceName = name; faceUntil = now() + dur; },   // 캐릭터 표정: happy | wow | focus
     hud(k, v) { hudVals[k] = v; },
     pop(text, x, y, color = '#F26B4F', size = 0.05) { fx.push({ type: 'text', text, x, y, color, size, t: now() }); },
@@ -797,7 +808,7 @@ export function start(cfg) {
     // 판마다 동작 감지·연습 캐릭터 상태를 모두 처음으로
     Object.assign(jump, { air: false, airSince: 0, standSince: 0, upHold: 0 }); Object.assign(duck, { on: false, hold: 0, offHold: 0 });
     Object.assign(synth, { squat: 0, squatTarget: 0, jumpT: -9, hand: null, kick: { side: null, t: -9 }, knees: false, preset: null, keys: {}, pumpL: 0, pumpR: 0, act: 0, prevLm: null });
-    synth2.preset = null;
+    Object.assign(synth2, { preset: null, jumpT: -9, knees: false, keys: {} }); Object.assign(jump2, { air: false, airSince: 0, upHold: 0 });
     base2.ok = false; calib2.win = []; body2.visible = false; body2.lm = null;
     if (input === 'synth') { setSynthBase(); startCountdown(t); return; }
     if (useEnergy && !usePose) { mode = 'ecalib'; ecal.phase = 'still'; ecal.until = t + 2.5; ['still', 'stillL', 'stillR', 'move', 'moveL', 'moveR'].forEach(k => ecal[k] = []); return; }
@@ -955,7 +966,14 @@ export function start(cfg) {
     } else if (mode !== 'start' && mode !== 'end') {
       const P = synthBody(t);
       processPose(P, t);
-      if (duo) processPose2(buildBody(Object.assign({ cx: synth2.cx }, synth2.preset || {})), t);
+      if (duo) {
+        if (synth2.keys.left) synth2.cx = Math.max(0.25, synth2.cx - 0.75 * dt);
+        if (synth2.keys.right) synth2.cx = Math.min(ASPECT - 0.25, synth2.cx + 0.75 * dt);
+        const jt = t - synth2.jumpT, jumpH = jt >= 0 && jt <= 0.55 ? 4 * (jt / 0.55) * (1 - jt / 0.55) * 0.07 : 0;
+        const d2 = Object.assign({ cx: synth2.cx, jump: jumpH }, synth2.preset || {});
+        if (synth2.knees) d2.raise = Math.floor(t / 0.28) % 2 ? 'L' : 'R';
+        processPose2(buildBody(d2), t);
+      }
       // 연습 모드 움직임 양: 몸 움직임 + 키(A/L)
       let mv = 0; if (synth.prevLm) for (const i of [0, 15, 16, 25, 26, 27, 28, 11, 12]) mv += Math.hypot(P[i].x - synth.prevLm[i].x, P[i].y - synth.prevLm[i].y);
       synth.prevLm = P;
@@ -1036,8 +1054,13 @@ export function start(cfg) {
     try {
       btn.textContent = '카메라를 켜는 중…';
       if (!video.srcObject) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 }, facingMode: 'user' }, audio: false });
+        const vc = { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } };
+        const camId = $('cam-sel').value || lsGet('dolbom-cam');
+        let stream;
+        try { stream = await navigator.mediaDevices.getUserMedia({ video: camId ? { ...vc, deviceId: { exact: camId } } : { ...vc, facingMode: 'user' }, audio: false }); }
+        catch (e) { if (!camId || e.name === 'NotAllowedError') throw e; stream = await navigator.mediaDevices.getUserMedia({ video: { ...vc, facingMode: 'user' }, audio: false }); }   // saved camera unplugged -> default camera
         video.srcObject = stream; await video.play();
+        listCams();          // camera names become readable after permission
       }
       if (usePose && !landmarker) {
         btn.textContent = '몸 인식 준비 중… (처음엔 조금 걸려요)';
@@ -1067,6 +1090,25 @@ export function start(cfg) {
     $('keys').innerHTML = cfg.keys || '<b>←→</b> 옆으로 · <b>스페이스</b> 점프 · <b>↓</b> 쪼그려 앉기 · <b>마우스</b> 손 움직이기';
     $('keys').hidden = false; beginRound();
   }
+  // camera picker: shown only when 2+ cameras are connected (e.g. laptop camera + phone used as a webcam). Choice is remembered.
+  async function listCams() {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.deviceId);
+      const box = $('cam-pick'), sel = $('cam-sel');
+      if (devs.length < 2) { box.hidden = true; return; }
+      const cur = sel.value || lsGet('dolbom-cam');
+      sel.innerHTML = devs.map((d, i) => `<option value="${d.deviceId}">${(d.label || '카메라 ' + (i + 1)).replace(/[<>&]/g, '')}</option>`).join('');
+      if (cur && devs.some(d => d.deviceId === cur)) sel.value = cur;
+      box.hidden = false;
+    } catch (e) { console.warn(e); }
+  }
+  $('cam-sel').onchange = () => {
+    lsSet('dolbom-cam', $('cam-sel').value);
+    if (video.srcObject) { video.srcObject.getTracks().forEach(tr => tr.stop()); video.srcObject = null; }   // next start opens the new camera
+  };
+  listCams();
+  if (navigator.mediaDevices && 'ondevicechange' in navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', listCams);
   $('go-cam').onclick = startCamera;
   $('go-key').onclick = startSynth;
   $('again').onclick = () => { $('end').hidden = true; beginRound(); };
@@ -1083,6 +1125,12 @@ export function start(cfg) {
     if (k === 'KeyR') synth.knees = true;
     if (k === 'KeyZ') synth.kick = { side: 'L', t: now() };
     if (k === 'KeyX') synth.kick = { side: 'R', t: now() };
+    if (duo) {     // second friend in practice mode: W jump, E run in place (hold), A / D sideways
+      if (k === 'KeyW' && now() - synth2.jumpT > 0.5) synth2.jumpT = now();
+      if (k === 'KeyE') synth2.knees = true;
+      if (k === 'KeyA') synth2.keys.left = true;
+      if (k === 'KeyD') synth2.keys.right = true;
+    }
     if (k === 'KeyA') synth.pumpL = Math.min(0.25, synth.pumpL + 0.05);
     if (k === 'KeyL') synth.pumpR = Math.min(0.25, synth.pumpR + 0.05);
     cfg.onKey && cfg.onKey(api, e);
@@ -1092,6 +1140,9 @@ export function start(cfg) {
     if (e.code === 'ArrowLeft') synth.keys.left = false;
     if (e.code === 'ArrowRight') synth.keys.right = false;
     if (e.code === 'KeyR') synth.knees = false;
+    if (e.code === 'KeyE') synth2.knees = false;
+    if (e.code === 'KeyA') synth2.keys.left = false;
+    if (e.code === 'KeyD') synth2.keys.right = false;
   });
   cv.addEventListener('mousemove', (e) => { if (input === 'synth') synth.hand = fromScreen(e.clientX, e.clientY); });
   cv.addEventListener('mouseleave', () => { synth.hand = null; });
