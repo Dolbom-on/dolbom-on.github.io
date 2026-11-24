@@ -8,6 +8,7 @@
 // 기준 몸 크기: T = 어깨 중점~골반 중점 거리, W = 어깨 너비 (시작할 때 2초 가만히 서서 잼)
 
 import { CHAR_PARTS } from './charparts.js';   // 캐릭터 조각 그림의 관절 위치 (그림 자르는 스크립트가 만듦)
+import { createBgm, SONG_OF } from './bgm.js'; // 배경음악 (자작곡, 브라우저가 직접 연주)
 
 // 몸 인식 프로그램(MediaPipe 0.10.14)과 모델은 사이트 안(vendor/mediapipe)에 넣어 둠 — 외부 서버가 막혀도 동작
 const MP_URL = new URL('../vendor/mediapipe', import.meta.url).href;
@@ -449,6 +450,11 @@ export function start(cfg) {
 <div id="status"></div>
 <div id="cam"><canvas id="camfx" width="320" height="240"></canvas><span class="tag">카메라</span></div>
 <div id="keys" hidden></div>
+<style>/* 배경음악 켜기·끄기 버튼 (engine.css 가 예전 것으로 남아 있어도 보이게 여기에 둠) */
+.bgm-btn { position: fixed; right: 16px; top: 84px; width: 48px; height: 48px; border-radius: 50%; border: 0; background: rgba(255,255,255,.92); box-shadow: 0 2px 10px rgba(31,36,48,.12);
+  font-size: 22px; line-height: 48px; padding: 0; cursor: pointer; z-index: 11; }
+.bgm-btn:hover { background: #fff; } .bgm-btn[hidden] { display: none; }</style>
+<button class="bgm-btn" id="bgm-btn" tabindex="-1" type="button"></button>
 <div class="overlay" id="start"><div class="panel">
   <h1>${cfg.emoji} ${cfg.title}</h1>
   <p>${cfg.desc}</p>
@@ -497,9 +503,18 @@ export function start(cfg) {
   const imagesReady = Promise.race([Promise.all(loads), new Promise(r => setTimeout(r, 8000))]);
 
   // 소리
-  let ac = null;
+  let ac = null, bgm = null;
+  // 배경음악: 놀이마다 곡이 정해져 있음(cfg.bgm 으로 바꿀 수 있음). 끄고 켠 것은 이 컴퓨터에 기억 (모든 놀이 공통)
+  const SONG = cfg.bgm === false ? null : cfg.bgm || SONG_OF[cfg.id] || 'run';
+  let musicOn = lsGet('dolbom-bgm') !== 'off';
+  const LV_TEMPO = { easy: 1, mid: 1.06, hard: 1.12 };
+  let musicFast = false, musicLevel = null;
+  const musicTempo = () => (LV_TEMPO[level] || 1) * (musicFast ? 1.1 : 1);
+  function startMusic() { if (bgm && SONG && musicOn) { musicFast = false; bgm.play(SONG, { tempo: musicTempo(), intensity: musicLevel ?? 1 }); } }
+  function renderMusicBtn() { const b = $('bgm-btn'); if (!b) return; b.hidden = !SONG; b.textContent = musicOn ? '🔊' : '🔇'; b.title = musicOn ? '배경음악 끄기' : '배경음악 켜기'; b.setAttribute('aria-label', b.title); }
   const beep = (f, d = 0.12, type = 'sine', vol = 0.13, delay = 0) => {
     if (!ac) return;
+    if (bgm && bgm.playing && !delay) bgm.duck();
     const t = ac.currentTime + delay, o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
     o.connect(g).connect(ac.destination); o.start(t); o.stop(t + d + 0.02);
@@ -764,6 +779,8 @@ export function start(cfg) {
     pop(text, x, y, color = '#F26B4F', size = 0.05) { fx.push({ type: 'text', text, x, y, color, size, t: now() }); },
     burst(x, y, color = '#FFD24D', n = 10) { for (let i = 0; i < n; i++) fx.push({ type: 'dot', x, y, vx: rand(-1, 1) * 220, vy: rand(-1.3, 0.3) * 220, color, t: now() }); },
     finish() { if (mode === 'play' && !endAt) endAt = now() + 0.6; },
+    // 점점 고조되는 곡(로켓)에서 악기 수: 0~1
+    music(v) { musicLevel = Math.max(0, Math.min(1, v)); if (bgm) bgm.intensity = musicLevel; },
     status: setStatus,
     drawImg(name, x, y, w, rot = 0, alpha = 1, flip = false) {
       const im = IMG[name]; if (!im) return false;
@@ -800,9 +817,11 @@ export function start(cfg) {
     playEnd = t + (levels[level].duration || cfg.duration || 60);
     renderHud(); $('hud').hidden = false;
     cfg.init && cfg.init(api, t);
+    startMusic();
   }
   function finish() {
     mode = 'end'; $('hud').hidden = true; setStatus('');
+    if (bgm) bgm.stop(0.6);
     const r = cfg.result ? cfg.result(api) : { stats: [], msg: '' };
     $('e-stats').innerHTML = r.stats.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('');
     $('e-msg').textContent = r.msg || '';
@@ -1008,6 +1027,7 @@ export function start(cfg) {
     }
     if (mode === 'play') {
       cfg.update && cfg.update(api, t, dt);
+      if (bgm && bgm.playing && !musicFast && playEnd - t < 10) { musicFast = true; bgm.tempo = musicTempo(); }   // 마지막 10초는 조금 빠르게
       if (t >= playEnd && !endAt) endAt = t + (cfg.endDelay ?? 0.8);
       if (endAt && t >= endAt) finish();
       updateHud();
@@ -1053,7 +1073,15 @@ export function start(cfg) {
     });
   }
   renderDuo();
-  const initAudio = () => { if (!ac) { try { ac = new AudioContext(); } catch {} } else if (ac.state === 'suspended') ac.resume(); };
+  const initAudio = () => { if (!ac) { try { ac = new AudioContext(); bgm = createBgm(ac); } catch {} } else if (ac.state === 'suspended') ac.resume(); };
+  renderMusicBtn();
+  $('bgm-btn').onclick = (e) => {
+    e.currentTarget.blur(); musicOn = !musicOn; lsSet('dolbom-bgm', musicOn ? 'on' : 'off'); renderMusicBtn();
+    initAudio();
+    if (!musicOn && bgm) bgm.stop(0.3);
+    else if (musicOn && mode === 'play' && bgm && !bgm.playing) { startMusic(); bgm.tempo = musicTempo(); }
+  };
+  document.addEventListener('visibilitychange', () => { if (!ac) return; if (document.hidden) ac.suspend(); else ac.resume(); });
 
   async function startCamera() {
     const btn = $('go-cam'); btn.disabled = true; $('err').hidden = true; initAudio();
@@ -1155,7 +1183,7 @@ export function start(cfg) {
   cv.addEventListener('mousemove', (e) => { if (input === 'synth') synth.hand = fromScreen(e.clientX, e.clientY); });
   cv.addEventListener('mouseleave', () => { synth.hand = null; });
 
-  window.__game = { api, sim: { pose: null, pose2: null, energy: null }, get mode() { return mode; }, base, base2, energy,
+  window.__game = { api, sim: { pose: null, pose2: null, energy: null }, get mode() { return mode; }, base, base2, energy, get bgm() { return bgm; }, get song() { return SONG; },
     setDuo(v) { duo = !!v && !!cfg.duo; renderDuo(); },
     skip() { if (mode === 'countdown') countEnd = now(); },
     end() { if (mode === 'play') playEnd = now(); },

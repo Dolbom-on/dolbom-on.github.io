@@ -24,8 +24,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: var(--c-soft
 #cam .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.55); color: #fff; font-size: 13px; padding: 2px 8px; border-radius: 999px; }
 
 #keys { position: fixed; left: 16px; bottom: 16px; background: rgba(255,255,255,.92); border-radius: 14px; padding: 8px 14px; font-size: 14px; color: var(--soft); max-width: min(60vw, 560px); }
-#keys[hidden] { display: none; }
-#keys b { color: var(--ink); }
+#keys[hidden] { display: none; }#keys b { color: var(--ink); }
 
 .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(255,248,244,.72); backdrop-filter: blur(3px); padding: 16px; z-index: 10; overflow: auto; }
 .overlay[hidden] { display: none; }
