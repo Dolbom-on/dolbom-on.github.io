@@ -43,7 +43,7 @@ export function viewFor(api, k) {
     W: { get: () => api.W / 2 }, k: { value: k }, off: { value: off },
     char: { get: () => api.charOf(k) },
     lm: { get: () => api.people[k].lm }, base: { get: () => api.people[k].base },
-    visible: { get: () => api.people[k].visible }, jumping: { get: () => api.people[k].jumping },
+    visible: { get: () => api.people[k].visible }, jumping: { get: () => api.people[k].jumping }, ducking: { get: () => api.people[k].ducking },
     pop: { value: (text, x, y, ...r) => api.pop(text, x + off, y, ...r) },
     burst: { value: (x, y, ...r) => api.burst(x + off, y, ...r) },
   });
@@ -60,7 +60,7 @@ export function eachHalf(api, ctx, fn) {
   ctx.fillStyle = 'rgba(31,36,48,.12)'; ctx.fillRect(api.W / 2 - 1, 0, 2, api.H);
 }
 // name label at the top of each half
-export function halfLabel(v, text) { if (v.duo) v.text(text, v.W / 2, v.H * 0.11, v.H * 0.034, '#1F2430', 900); }
+export function halfLabel(v, text) { if (v.duo) v.text(text, v.W / 2, v.H * 0.17,v.H * 0.034, '#1F2430', 900); }
 
 // Whole-body sprite of the picked mascot, feet at (x, feetY). pose: fstand|fstep|foops (front) or bstand|bjump|boops (back).
 // height = on-screen height of the standing sprite; other poses keep their size relative to it. flip mirrors left/right.
@@ -88,7 +88,7 @@ export function drawKid(api, ctx, x, feetY, height, pose, t, moving = true, grou
   else if (moving && Math.floor(t / 0.16) % 2) name = 'run2';
   const im = api.img(pre + name) || api.img('kid_' + name) || run1;
   let k = height / run1.height;
-  if (name === 'duck') k *= 0.85;
+  if (name === 'duck' && pre === 'kid_') k *= 0.85;      // old boy sprite was drawn larger; mascot duck sprites share the run scale
   const bob = pose === 'run' && moving ? Math.abs(Math.sin(t * Math.PI / 0.16)) * height * 0.015 : 0;
   ctx.fillStyle = 'rgba(80,110,60,.18)';
   const lift = Math.max(0, groundY - feetY) / height;

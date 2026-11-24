@@ -487,7 +487,7 @@ export function start(cfg) {
   const imgList = [...(cfg.images || []),
     ...(view === 'camera' && cfg.puppet === 'paws' ? PAW_IMAGES : view === 'camera' && cfg.puppet !== false ? PUPPET_IMAGES : []),
     ...(cfg.smooth ? SMOOTH_IMAGES : []),
-    ...(view === 'scene' ? (cfg.images || []).filter(n => /^kid_(run1|run2|jump|oops|cheer)$/.test(n)).flatMap(n => CHAR_IDS.map(c => `${c}_${n.slice(4)}`)) : [])];   // side-view sprites of each character
+    ...(view === 'scene' ? (cfg.images || []).filter(n => /^kid_(run1|run2|jump|oops|cheer|duck)$/.test(n)).flatMap(n => CHAR_IDS.map(c => `${c}_${n.slice(4)}`)) : [])];   // side-view sprites of each character
   const loads = [];
   const load = (src, ok) => loads.push(new Promise(res => { const im = new Image(); im.onload = () => { ok(im); res(); }; im.onerror = () => res(); im.src = src; }));
   imgList.forEach(n => load(ART + n + '.png', im => { IMG[n] = im; }));
@@ -537,6 +537,7 @@ export function start(cfg) {
   const synth = { cx: ASPECT / 2, squat: 0, squatTarget: 0, jumpT: -9, hand: null, kick: { side: null, t: -9 }, knees: false, preset: null, keys: {}, pumpL: 0, pumpR: 0, prevLm: null };
   const synth2 = { cx: ASPECT / 2 + 0.3, preset: null, jumpT: -9, knees: false, keys: {} };   // 연습 모드 두 번째 친구 (W 점프 · E 제자리 달리기 · A/D 옆으로)
   const jump2 = { air: false, airSince: 0, upHold: 0 };      // second friend's jump (duo games)
+  const duck2 = { on: false, hold: 0, offHold: 0 };          // second friend's crouch (duo games)
   function synthBody(now) {
     const s = synth;
     s.squat += (s.squatTarget - s.squat) * 0.25;
@@ -662,8 +663,12 @@ export function start(cfg) {
         if (rise > UP) { jump2.upHold += dt; if (jump2.upHold >= 0.05) { jump2.air = true; jump2.airSince = now; jump2.upHold = 0; if (cfg.onJump) cfg.onJump(api, now, 1); } }
         else jump2.upHold = 0;
       } else if (rise < DOWN || now - jump2.airSince > 1.5) jump2.air = false;
+      // crouch (same rule as the first friend: shoulders 0.30T + hips 0.12T lower); cfg.onDuck(api, t, 1)
+      const shDrop = (m.shY - base2.shY) / base2.T, hipDrop = (m.hipY - base2.hipY) / base2.T;
+      if (!duck2.on) { if (shDrop > 0.3 / SENS && hipDrop > 0.12 / SENS) { duck2.hold += dt; if (duck2.hold >= 0.08) { duck2.on = true; duck2.hold = 0; if (cfg.onDuck) cfg.onDuck(api, now, 1); } } else duck2.hold = 0; }
+      else if (shDrop < 0.15) { duck2.offHold += dt; if (duck2.offHold >= 0.12) { duck2.on = false; duck2.offHold = 0; } } else duck2.offHold = 0;
     }
-    if (base2.ok && !jump2.air && Math.abs((base2.cy - m.cy) / base2.T) < 0.1) {   // 서 있을 때 기준을 천천히 따라감
+    if (base2.ok && !jump2.air && !duck2.on && Math.abs((base2.cy - m.cy) / base2.T) < 0.1) {   // 서 있을 때 기준을 천천히 따라감
       const k = 1 - Math.exp(-dt / 3);
       base2.cy += (m.cy - base2.cy) * k; base2.shY += (m.shY - base2.shY) * k; base2.hipY += (m.hipY - base2.hipY) * k; base2.cx += (m.cx - base2.cx) * k;
     }
@@ -753,7 +758,7 @@ export function start(cfg) {
     get char() { return CH[0]; },          // picked character of the (first) friend
     charOf: (k) => CH[k] || CH[0],          // picked character of friend k (0 = left, 1 = right)
     // 사람별 정보 (0 = 왼쪽/혼자, 1 = 오른쪽 친구)
-    get people() { return [{ lm: body.visible ? body.lm : null, base, visible: body.visible, jumping: jump.air }, { lm: body2.visible ? body2.lm : null, base: base2, visible: body2.visible, jumping: jump2.air }]; },
+    get people() { return [{ lm: body.visible ? body.lm : null, base, visible: body.visible, jumping: jump.air, ducking: duck.on }, { lm: body2.visible ? body2.lm : null, base: base2, visible: body2.visible, jumping: jump2.air, ducking: duck2.on }]; },
     react(name, dur = 0.6) { faceName = name; faceUntil = now() + dur; },   // 캐릭터 표정: happy | wow | focus
     hud(k, v) { hudVals[k] = v; },
     pop(text, x, y, color = '#F26B4F', size = 0.05) { fx.push({ type: 'text', text, x, y, color, size, t: now() }); },
@@ -808,7 +813,7 @@ export function start(cfg) {
     // 판마다 동작 감지·연습 캐릭터 상태를 모두 처음으로
     Object.assign(jump, { air: false, airSince: 0, standSince: 0, upHold: 0 }); Object.assign(duck, { on: false, hold: 0, offHold: 0 });
     Object.assign(synth, { squat: 0, squatTarget: 0, jumpT: -9, hand: null, kick: { side: null, t: -9 }, knees: false, preset: null, keys: {}, pumpL: 0, pumpR: 0, act: 0, prevLm: null });
-    Object.assign(synth2, { preset: null, jumpT: -9, knees: false, keys: {} }); Object.assign(jump2, { air: false, airSince: 0, upHold: 0 });
+    Object.assign(synth2, { preset: null, jumpT: -9, knees: false, keys: {}, squat: 0, squatTarget: 0 }); Object.assign(jump2, { air: false, airSince: 0, upHold: 0 }); Object.assign(duck2, { on: false, hold: 0, offHold: 0 });
     base2.ok = false; calib2.win = []; body2.visible = false; body2.lm = null;
     if (input === 'synth') { setSynthBase(); startCountdown(t); return; }
     if (useEnergy && !usePose) { mode = 'ecalib'; ecal.phase = 'still'; ecal.until = t + 2.5; ['still', 'stillL', 'stillR', 'move', 'moveL', 'moveR'].forEach(k => ecal[k] = []); return; }
@@ -970,7 +975,8 @@ export function start(cfg) {
         if (synth2.keys.left) synth2.cx = Math.max(0.25, synth2.cx - 0.75 * dt);
         if (synth2.keys.right) synth2.cx = Math.min(ASPECT - 0.25, synth2.cx + 0.75 * dt);
         const jt = t - synth2.jumpT, jumpH = jt >= 0 && jt <= 0.55 ? 4 * (jt / 0.55) * (1 - jt / 0.55) * 0.07 : 0;
-        const d2 = Object.assign({ cx: synth2.cx, jump: jumpH }, synth2.preset || {});
+        synth2.squat = (synth2.squat || 0) + ((synth2.squatTarget || 0) - (synth2.squat || 0)) * 0.25;
+        const d2 = Object.assign({ cx: synth2.cx, jump: jumpH, squat: synth2.squat }, synth2.preset || {});
         if (synth2.knees) d2.raise = Math.floor(t / 0.28) % 2 ? 'L' : 'R';
         processPose2(buildBody(d2), t);
       }
@@ -1128,6 +1134,7 @@ export function start(cfg) {
     if (duo) {     // second friend in practice mode: W jump, E run in place (hold), A / D sideways
       if (k === 'KeyW' && now() - synth2.jumpT > 0.5) synth2.jumpT = now();
       if (k === 'KeyE') synth2.knees = true;
+      if (k === 'KeyS') synth2.squatTarget = 1;
       if (k === 'KeyA') synth2.keys.left = true;
       if (k === 'KeyD') synth2.keys.right = true;
     }
@@ -1141,6 +1148,7 @@ export function start(cfg) {
     if (e.code === 'ArrowRight') synth.keys.right = false;
     if (e.code === 'KeyR') synth.knees = false;
     if (e.code === 'KeyE') synth2.knees = false;
+    if (e.code === 'KeyS') synth2.squatTarget = 0;
     if (e.code === 'KeyA') synth2.keys.left = false;
     if (e.code === 'KeyD') synth2.keys.right = false;
   });
