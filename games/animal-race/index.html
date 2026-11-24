@@ -12,7 +12,7 @@ import { start, clamp } from '../../common/engine.js';
 import { makeScene, drawKid, eachHalf, viewFor, halfLabel } from '../../common/scene.js';
 
 // one state per friend (two friends = split screen, each races its own cheetah)
-const mk = () => ({ scene: makeScene(), dist: 0, cheetah: 0, steps: 0, speed: 0, puddles: [], stepTimes: [], splash: -9, done: false, finishT: 0, jumpT: -9, jumpsOk: 0, win: null, cheetahDone: false,
+const mk = () => ({ scene: makeScene(), dist: 0, cheetah: 0, steps: 0, speed: 0, puddles: [], stepTimes: [], splash: -9, done: false, finishT: 0, jumpT: -9, jumpsOk: 0, win: null, cheetahDone: false, thigh: null,
   knee: { L: { up: false, last: -9 }, R: { up: false, last: -9 }, lastAny: -9 } });
 const P = [mk(), mk()];
 const G = { startT: 0 };
@@ -53,16 +53,21 @@ start({
     const L = api.L;
     for (let k = 0; k < N(api); k++) {
       const S = P[k], v = viewFor(api, k), lm = v.lm, b = v.base;
-      // 무릎 들기 감지: 같은 쪽 골반보다 0.38T 안쪽으로 올라오고, 반대 무릎보다 0.15T 높을 때
+      // 무릎 들기 감지: 그 친구가 서 있을 때 잰 골반~무릎 높이(thigh)를 기준으로,
+      // 무릎이 그 높이의 20% 넘게 올라오고(허벅지를 앞으로 약 37° 듦) 반대 무릎보다 높을 때 한 걸음.
+      // (예전 기준: 골반 아래 0.38T 안쪽 = 허벅지를 약 60° 들어야 해서 보통 제자리 뛰기는 잘 안 세졌음)
       if (lm && !S.done) {
+        if (!S.thigh) S.thigh = { L: Math.max(0.5 * b.T, b.kneeL - b.hipY), R: Math.max(0.5 * b.T, b.kneeR - b.hipY), T: b.T };
+        const sc = b.T / S.thigh.T;                                        // 앞뒤로 움직여 몸 크기가 바뀌어도 맞게
         for (const [side, ki, hi, oi] of [['L', 25, 23, 26], ['R', 26, 24, 25]]) {
           if ((lm[ki].v ?? 1) < 0.5) continue;
-          const rel = (lm[ki].y - lm[hi].y) / b.T, higher = (lm[oi].y - lm[ki].y) / b.T;
+          const th = S.thigh[side] * sc;
+          const rel = (lm[ki].y - lm[hi].y) / th, higher = (lm[oi].y - lm[ki].y) / th;
           const kn = S.knee[side];
-          if (!kn.up && rel < 0.38 && higher > 0.15) {
+          if (!kn.up && rel < 0.8 && higher > 0.15) {
             kn.up = true;
-            if (t - S.knee.lastAny > 0.18 && t - kn.last > 0.35) step(api, S, side, t, k);
-          } else if (kn.up && rel > 0.55) kn.up = false;
+            if (t - S.knee.lastAny > 0.15 && t - kn.last > 0.3) step(api, S, side, t, k);
+          } else if (kn.up && rel > 0.9) kn.up = false;
         }
       }
       // 속도: 최근 3초 걸음 수
