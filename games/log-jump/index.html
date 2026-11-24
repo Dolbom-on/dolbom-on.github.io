@@ -12,27 +12,31 @@ import { start, rand } from '../../common/engine.js';
 import { makeScene, drawKid, eachHalf, viewFor, halfLabel } from '../../common/scene.js';
 
 const AIR = 0.72;
-// one state per friend (two friends = split screen, same logs for both)
-const mk = () => ({ scene: makeScene(), logs: [], jumpStart: -9, queued: false, stumble: -9, score: 0, hits: 0, jumps: 0, combo: 0 });
+// one state per friend (two friends = split screen, same obstacles for both)
+// obstacles: 'log' rolls on the ground -> jump over it / 'bee' flies at head height -> crouch under it
+const mk = () => ({ scene: makeScene(), obs: [], jumpStart: -9, queued: false, stumble: -9, duckT: -9, score: 0, logsOk: 0, beesOk: 0, hits: 0, jumps: 0, combo: 0 });
 const P = [mk(), mk()];
 const G = { next: 0 };
 const GY = (api) => api.H * 0.74, KID = (api) => api.H * 0.3, PEAK = (api) => api.H * 0.2, R = (api) => Math.max(22, api.H * 0.055);
+const BEE_Y = (api) => GY(api) - KID(api) * 0.92;            // head height of the standing character
 const kidH = (api, S, t) => { const p = (t - S.jumpStart) / AIR; return p < 0 || p > 1 ? 0 : 4 * p * (1 - p) * PEAK(api); };
+const crouched = (v, S, t) => v.ducking || t - S.duckT < 0.35;
 const WORDS = ['좋아요!', '멋져요!', '최고!', '훌륭해요!'];
 const N = (api) => api.duo ? 2 : 1;
 
 start({
   id: 'log-jump', cat: 'run', view: 'scene', emoji: '🪵', title: '통나무 점프', duo: true,
-  desc: '굴러오는 통나무를 제자리에서 두 발로 점프해서 넘어요. 둘이 하면 화면이 반으로 나뉘어 같은 통나무를 함께 넘어요.',
-  how: ['카메라에서 2.5~3m 떨어져 머리부터 무릎까지 보이게 서요. (둘이면 나란히)', '통나무가 아이 발 앞에 오기 조금 전에 두 발로 점프해요.', '부딪혀도 괜찮아요. 다음 통나무를 넘어요!'],
-  tip: '통나무가 오면 두 발로 점프!',
-  images: ['kid_run1', 'kid_run2', 'kid_jump', 'kid_oops', 'log', 'tree', 'bush', 'cloud'],
-  keys: '<b>스페이스</b> 점프 · 둘이: 오른쪽 친구 <b>W</b> 점프',
-  hud: [['score', '넘은 통나무'], ['jumps', '점프', '번']],
+  desc: '굴러오는 통나무는 두 발로 점프해서 넘고, 머리 위로 날아오는 꿀벌은 쪼그려 앉아 피해요. 둘이 하면 화면이 반으로 나뉘어 함께 해요.',
+  how: ['카메라에서 2.5~3m 떨어져 머리부터 무릎까지 보이게 서요. (둘이면 나란히)', '통나무(⬆)가 오면 두 발로 점프, 꿀벌(⬇)이 오면 쪼그려 앉아요.', '부딪혀도 괜찮아요. 다음 장애물을 피해요!'],
+  tip: '통나무는 점프! 꿀벌은 쏙 앉기!',
+  images: ['kid_run1', 'kid_run2', 'kid_jump', 'kid_oops', 'kid_duck', 'log', 'bee1', 'bee2', 'tree', 'bush', 'cloud'],
+  keys: '<b>스페이스</b> 점프 · <b>↓</b> 쪼그려 앉기 · 둘이: 오른쪽 친구 <b>W</b> 점프 · <b>S</b> 앉기',
+  hud: [['score', '피한 장애물'], ['jumps', '점프', '번']],
   levels: {
-    easy: { name: '하', sub: '처음 해요', travel: 2.6, gap: [1.8, 2.4], double: 0, triple: 0, pairGap: 1.1 },
-    mid:  { name: '중', sub: '익숙해요', travel: 2.1, gap: [1.4, 2.0], double: 0.3, triple: 0, pairGap: 1.05 },
-    hard: { name: '상', sub: '도전해요', travel: 1.7, gap: [1.1, 1.6], double: 0.35, triple: 0.15, pairGap: 0.92 },
+    // bee: chance that an obstacle is a bee / combo: chance of "log then right after a bee" (jump, then crouch)
+    easy: { name: '하', sub: '처음 해요', travel: 2.6, gap: [1.9, 2.5], double: 0, triple: 0, pairGap: 1.1, bee: 0.25, combo: 0 },
+    mid:  { name: '중', sub: '익숙해요', travel: 2.1, gap: [1.5, 2.0], double: 0.25, triple: 0, pairGap: 1.05, bee: 0.45, combo: 0.15 },
+    hard: { name: '상', sub: '도전해요', travel: 1.7, gap: [1.2, 1.7], double: 0.3, triple: 0.12, pairGap: 0.95, bee: 0.5, combo: 0.3 },
   },
   init(api, t) { window.__S = P[0]; window.__P = P; for (const S of P) Object.assign(S, mk(), { scene: S.scene }); G.next = t + 1.2; },
   onJump(api, t, k = 0) {
@@ -42,43 +46,64 @@ start({
     const p = (t - S.jumpStart) / AIR;
     if (p >= 1 || p < 0) { S.jumpStart = t; S.queued = false; api.beep(k ? 620 : 520, 0.1, 'triangle', 0.08); } else if (p > 0.55) S.queued = true;
   },
+  onDuck(api, t, k = 0) { if (P[k]) P[k].duckT = t; },
   update(api, t, dt) {
     const L = api.L;
-    // same logs for everybody
+    // same obstacles for everybody
     if (t >= G.next && api.timeLeft > L.travel + 0.3) {
-      const r = Math.random(), n = r < L.triple ? 3 : r < L.triple + L.double ? 2 : 1;
-      for (let k = 0; k < N(api); k++) for (let i = 0; i < n; i++) P[k].logs.push({ arrive: t + L.travel + i * L.pairGap, judged: false, hit: 0 });
-      G.next = t + (n - 1) * L.pairGap + rand(L.gap[0], L.gap[1]);
+      const list = [];
+      const r = Math.random();
+      if (Math.random() < L.combo) list.push('log', 'bee');                    // jump, then crouch right after
+      else if (Math.random() < L.bee) list.push('bee');
+      else { const n = r < L.triple ? 3 : r < L.triple + L.double ? 2 : 1; for (let i = 0; i < n; i++) list.push('log'); }
+      for (let k = 0; k < N(api); k++) list.forEach((type, i) => P[k].obs.push({ type, arrive: t + L.travel + i * L.pairGap, judged: false, hit: 0 }));
+      G.next = t + (list.length - 1) * L.pairGap + rand(L.gap[0], L.gap[1]);
     }
     for (let k = 0; k < N(api); k++) {
       const S = P[k], v = viewFor(api, k), cx = v.W * 0.26;
       S.scene.scroll(dt * (v.W / L.travel) * 0.45);
       if (S.queued && (t - S.jumpStart) / AIR >= 1) { S.jumpStart = t; S.queued = false; }
-      for (const g of S.logs) {
+      for (const g of S.obs) {
         if (g.judged || t < g.arrive - 0.03) continue;
         g.judged = true;
         const y = GY(v) - KID(v) - PEAK(v) * 0.6;
-        if (kidH(v, S, t) > R(v) * 0.9) { S.score++; S.combo++; v.pop(S.combo >= 3 ? `${S.combo}연속! ${WORDS[S.combo % 4]}` : '+1', cx, y); api.beep(880, 0.12); }
-        else { S.hits++; S.combo = 0; S.stumble = t; g.hit = t; v.pop('앗!', cx, y + PEAK(v) * 0.4, '#5B6170'); api.beep(180, 0.2, 'square', 0.06); }
+        const ok = g.type === 'log' ? kidH(v, S, t) > R(v) * 0.9 : crouched(v, S, t) && kidH(v, S, t) < R(v) * 0.5;
+        if (ok) {
+          S.score++; S.combo++; if (g.type === 'log') S.logsOk++; else S.beesOk++;
+          v.pop(S.combo >= 3 ? `${S.combo}연속! ${WORDS[S.combo % 4]}` : g.type === 'bee' ? '쏙! 피했다' : '+1', cx, y); api.beep(g.type === 'bee' ? 990 : 880, 0.12);
+        } else {
+          S.hits++; S.combo = 0; S.stumble = t; g.hit = t;
+          v.pop(g.type === 'bee' ? '앗, 꿀벌! 쪼그려 앉아요' : '앗! 점프해요', cx, y + PEAK(v) * 0.4, '#5B6170', 0.04); api.beep(180, 0.2, 'square', 0.06);
+        }
       }
-      S.logs = S.logs.filter(g => t - g.arrive < L.travel * 0.5);
+      S.obs = S.obs.filter(g => t - g.arrive < L.travel * 0.5);
     }
     if (api.duo) { api.hud('score', `${P[0].score} : ${P[1].score}`); api.hud('jumps', `${P[0].jumps} : ${P[1].jumps}`); }
     else { api.hud('score', P[0].score); api.hud('jumps', P[0].jumps); }
   },
   draw(api, ctx, t) {
     eachHalf(api, ctx, (v, k) => {
-      const S = P[k], gy = GY(v), W = v.W, L = v.L, cx = W * 0.26, r = R(v), sx = W + r * 2;
+      const S = P[k], gy = GY(v), W = v.W, H = v.H, L = v.L, cx = W * 0.26, r = R(v), sx = W + r * 2;
       S.scene.draw(v, ctx, gy);
-      if (v.mode === 'play') for (const g of S.logs) {
-        const x = cx + (g.arrive - t) / L.travel * (sx - cx);
-        const lift = g.hit ? Math.max(0, Math.sin(Math.min(1, (t - g.hit) / 0.4) * Math.PI)) * r * 1.2 : 0;
-        ctx.fillStyle = 'rgba(80,110,60,.18)'; ctx.beginPath(); ctx.ellipse(x, gy + 4, r * 0.9, r * 0.2, 0, 0, 7); ctx.fill();
-        if (!v.drawImg('log', x, gy - r - lift, r * 2, -x / r)) { ctx.fillStyle = '#C98B55'; ctx.beginPath(); ctx.arc(x, gy - r - lift, r, 0, 7); ctx.fill(); }
+      if (v.mode === 'play') for (const g of S.obs) {
+        const x = cx + (g.arrive - t) / L.travel * (sx - cx), soon = g.arrive - t;
+        if (g.type === 'log') {
+          const lift = g.hit ? Math.max(0, Math.sin(Math.min(1, (t - g.hit) / 0.4) * Math.PI)) * r * 1.2 : 0;
+          ctx.fillStyle = 'rgba(80,110,60,.18)'; ctx.beginPath(); ctx.ellipse(x, gy + 4, r * 0.9, r * 0.2, 0, 0, 7); ctx.fill();
+          if (!v.drawImg('log', x, gy - r - lift, r * 2, -x / r)) { ctx.fillStyle = '#C98B55'; ctx.beginPath(); ctx.arc(x, gy - r - lift, r, 0, 7); ctx.fill(); }
+          if (!g.judged && soon > 0.1 && soon < 1.3) v.text('⬆', x, gy - r * 3.1, H * 0.045, '#F26B4F', 900);
+        } else {
+          // bee: flies in at head height with a little wobble, bounces up when it bumps the head
+          const by = BEE_Y(v) + Math.sin(t * 9 + g.arrive) * H * 0.012 - (g.hit ? Math.min(1, (t - g.hit) / 0.4) * H * 0.15 : 0);
+          const img = Math.floor(t / 0.07) % 2 ? 'bee2' : 'bee1';
+          ctx.fillStyle = 'rgba(80,110,60,.12)'; ctx.beginPath(); ctx.ellipse(x, gy + 4, r * 0.6, r * 0.14, 0, 0, 7); ctx.fill();
+          if (!v.drawImg(img, x, by, H * 0.13)) { ctx.fillStyle = '#F5C542'; ctx.beginPath(); ctx.arc(x, by, r * 0.8, 0, 7); ctx.fill(); }
+          if (!g.judged && soon > 0.1 && soon < 1.3) v.text('⬇', x, by + H * 0.1,H * 0.045, '#3A7BEB', 900);
+        }
       }
       const moving = v.mode === 'play' || v.mode === 'countdown';
       const h = moving ? kidH(v, S, t) : 0;
-      const pose = t - S.stumble < 0.5 ? 'oops' : h > 2 ? 'jump' : 'run';
+      const pose = t - S.stumble < 0.5 ? 'oops' : h > 2 ? 'jump' : moving && crouched(v, S, t) ? 'duck' : 'run';
       drawKid(v, ctx, cx, gy - h, KID(v), pose, t, moving, gy);
       halfLabel(v, `${k ? '오른쪽' : '왼쪽'} 친구 · ${S.score}개`);
     });
@@ -86,10 +111,10 @@ start({
   result(api) {
     if (api.duo) {
       const [a, b] = P;
-      return { stats: [[a.score, '왼쪽 친구'], [b.score, '오른쪽 친구'], [a.score + b.score, '함께 넘은 통나무']], msg: '둘이 함께 통나무를 넘었어요! 🪵' };
+      return { stats: [[a.score, '왼쪽 친구'], [b.score, '오른쪽 친구'], [a.score + b.score, '함께 피한 장애물']], msg: '둘이 함께 통나무와 꿀벌을 피했어요! 🪵🐝' };
     }
     const S = P[0], total = S.score + S.hits;
-    return { stats: [[S.score, '넘은 통나무'], [S.jumps, '점프 횟수']], msg: total ? `통나무 ${total}개 중 ${S.score}개를 넘었어요.` : '' };
+    return { stats: [[S.logsOk, '넘은 통나무'], [S.beesOk, '피한 꿀벌'], [S.jumps, '점프 횟수']], msg: total ? `장애물 ${total}개 중 ${S.score}개를 피했어요.` : '' };
   },
 });
 </script>
