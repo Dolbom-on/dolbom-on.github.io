@@ -30,7 +30,7 @@ start({
     mid:  { name: '중', sub: '익숙해요', target: 13, actions: true, leak: 0.8, grace: 1.0 },
     hard: { name: '상', sub: '도전해요', target: 16, actions: true, leak: 1.1, grace: 0.7 },
   },
-  init(api, t) { window.__S = S; Object.assign(S, { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: t, stars: [], total: 0, still: 0, leaking: false }); },
+  init(api, t) { api.music(0.2); window.__S = S;Object.assign(S, { fuel: 0, rockets: 0, launch: -9, action: 0, actionAt: t, stars: [], total: 0, still: 0, leaking: false }); },
   update(api, t, dt) {
     const L = api.L, A = api.energy.A;
     const launching = t - S.launch < 2.6;
@@ -51,6 +51,7 @@ start({
     if (Math.random() < A * 0.22) S.stars.push({ x: rand(0.1, 0.9), y: 1, v: rand(0.2, 0.5), t });
     S.stars = S.stars.filter(s => t - s.t < 2);
     api.hud('rockets', S.rockets);
+    api.music(t - S.launch < 2.6 ? 1 : 0.2 + 0.8 * Math.min(1, S.fuel / L.target));   // music builds up as the tank fills
   },
   draw(api, ctx, t) {
     const W = api.W, H = api.H, L = api.L;
