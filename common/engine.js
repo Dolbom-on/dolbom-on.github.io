@@ -433,6 +433,11 @@ export function start(cfg) {
   const usePose = cfg.pose !== false, useEnergy = !!cfg.energy;
   const view = cfg.view || 'camera';      // camera: 카메라 화면 위에 놀이 / scene: 그림 배경 + 작은 카메라
   let duo = !!cfg.duo && params.get('duo') === '1';   // 두 명 같이 (cfg.duo 인 놀이만)
+  // 화면 안에 꼭 보여야 하는 점. 몸 위치·크기에 맞춰 캐릭터와 놀이 그림을 그리는 놀이(view camera)는 기본으로 발목까지
+  // (카메라에 가까이 서서 발이 잘리면 화면 전체가 확대되고 캐릭터가 화면 아래로 사라지므로, 그때는 시작하지 않고 뒤로 가라고 안내)
+  const NEED = cfg.need || (view === 'camera' && usePose ? [27, 28] : []);
+  const NEED_MSG = cfg.needMsg || '발끝까지 화면에 보이게 조금 뒤로 가 주세요';
+  const needOk = (lm) => NEED.every(i => lm[i] && (lm[i].v ?? 1) >= 0.6 && lm[i].y < 0.98) && (!NEED.length || !lm[0] || lm[0].y > 0.01);
   // 캐릭터(남자·여자) 고르기: 아이 그림이 나오는 놀이만. 고른 것은 이 컴퓨터에 기억 (다른 놀이에서도 그대로)
   const showChar = !!cfg.chars || (view === 'camera' && cfg.puppet !== false) || view === 'scene';
   const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -601,11 +606,13 @@ export function start(cfg) {
     body.prev = body.lm; body.prevT = body.t;
     body.lm = next; body.t = now;
     const m = metrics(next);
+    // 놀이 중에 너무 가까이 오면(필요한 점이 1초 넘게 화면 밖) 뒤로 가라고 안내
+    if (needOk(next)) body.cutSince = 0; else body.cutSince ||= now;
 
     if (mode === 'calib') {
       if (base.ok) return;                       // (두 명일 때) 친구 기준을 기다리는 중
-      // 이 놀이에 꼭 필요한 점(무릎·발목 등)이 잘 보일 때만 기준을 잼
-      if ((cfg.need || []).some(i => (next[i].v ?? 1) < 0.6)) { calib.win = []; calib.needMiss = true; return; }
+      // 이 놀이에 꼭 필요한 점(무릎·발목 등)이 화면 안에 잘 보일 때만 기준을 잼
+      if (!needOk(next)) { calib.win = []; calib.needMiss = true; return; }
       calib.needMiss = false;
       if (calib.win.length && now - calib.win[calib.win.length - 1].t > 0.2) calib.win = [];
       calib.win.push({ t: now, ...m });
@@ -658,8 +665,11 @@ export function start(cfg) {
     });
     body2.t = now; body2.visible = true; body2.lastSeen = now;
     const m = metrics(body2.lm);
+    if (needOk(body2.lm)) body2.cutSince = 0; else body2.cutSince ||= now;
     if (mode === 'calib') {
       if (base2.ok) return;
+      if (!needOk(body2.lm)) { calib2.win = []; calib2.needMiss = true; return; }   // 두 번째 친구도 같은 기준
+      calib2.needMiss = false;
       if (calib2.win.length && now - calib2.win[calib2.win.length - 1].t > 0.2) calib2.win = [];
       calib2.win.push({ t: now, ...m });
       while (calib2.win.length && now - calib2.win[0].t > 2) calib2.win.shift();
@@ -1015,9 +1025,11 @@ export function start(cfg) {
     }
     // 상태 안내
     if (input === 'camera' && usePose && mode !== 'start' && mode !== 'end') {
-      if (mode === 'calib') setStatus(calib.needMiss ? (cfg.needMsg || '발끝까지 화면에 보이게 조금 뒤로 가 주세요')
+      const cut = (b) => b.visible && b.cutSince && t - b.cutSince > 1;
+      if (mode === 'calib') setStatus((body.visible && calib.needMiss) || (duo && body2.visible && calib2.needMiss) ? (duo ? (body.visible && calib.needMiss ? '왼쪽 친구: ' : '오른쪽 친구: ') : '') + NEED_MSG
         : duo ? '두 사람이 카메라에서 3m쯤 떨어져, 팔을 벌려도 닿지 않게 나란히 서요' : (cfg.place || '카메라에서 약 2.5~3m 떨어져, 머리부터 발까지 보이게 서요'));
-      else setStatus(body.visible && (!duo || body2.visible) ? '' : duo ? '두 사람 모두 화면에 보이게 서 주세요' : '몸이 잘 안 보여요. 카메라에서 조금 떨어져 주세요');
+      else if (!(body.visible && (!duo || body2.visible))) setStatus(duo ? '두 사람 모두 화면에 보이게 서 주세요' : '몸이 잘 안 보여요. 카메라에서 조금 떨어져 주세요');
+      else setStatus(cut(body) || (duo && cut(body2)) ? (duo ? (cut(body) ? '왼쪽 친구: ' : '오른쪽 친구: ') : '') + NEED_MSG : '');
     }
     // 진행
     if (mode === 'countdown') {
@@ -1187,6 +1199,9 @@ export function start(cfg) {
     setDuo(v) { duo = !!v && !!cfg.duo; renderDuo(); },
     skip() { if (mode === 'countdown') countEnd = now(); },
     end() { if (mode === 'play') playEnd = now(); },
+    // 시험용: 카메라 없이 sim.pose 로 기준 재기부터 시작 (발이 잘린 자세는 시작되지 않는지 확인)
+    calibrate() { $('start').hidden = true; beginRound(); },
+    get needMiss() { return [!!calib.needMiss, !!calib2.needMiss]; }, get status() { return $('status').textContent; },
     now,
     // 시험용: 화면이 숨겨져 있어도 가상 시계로 n프레임을 바로 돌림. each(t) 를 매 프레임 부름
     step(n, dt = 1 / 60, each) { if (VT === null) VT = performance.now() / 1000; for (let i = 0; i < n; i++) { VT += dt; each && each(VT); frameBody(); } },
